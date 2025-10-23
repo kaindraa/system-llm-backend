@@ -21,7 +21,7 @@ class DocumentChunk(Base):
     content = Column(Text, nullable=False)
     page_number = Column(Integer)
     embedding = Column(Vector(768))  # Dimension can be changed based on embedding model
-    metadata = Column(JSONB)  # Additional metadata (e.g., headings, context)
+    chunk_metadata = Column(JSONB)  # Additional metadata (e.g., headings, context)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):
