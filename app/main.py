@@ -36,10 +36,42 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring"""
-    return {
-        "status": "healthy",
-        "database": "not configured yet"  # Will update in Phase B
-    }
+    from sqlalchemy import text
+    from app.core.database import engine
+
+    try:
+        # Test database connection
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT version()"))
+            db_version = result.scalar()
+
+            # Check pgvector
+            result = conn.execute(text("SELECT vector_version()"))
+            vector_version = result.scalar()
+
+            # Count tables
+            result = conn.execute(text(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'"
+            ))
+            table_count = result.scalar()
+
+        return {
+            "status": "healthy",
+            "database": {
+                "connected": True,
+                "postgres_version": db_version.split()[0] if db_version else None,
+                "pgvector_version": vector_version,
+                "tables_count": table_count
+            }
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "database": {
+                "connected": False,
+                "error": str(e)
+            }
+        }
 
 # Startup event
 @app.on_event("startup")
