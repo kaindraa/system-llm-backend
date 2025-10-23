@@ -1,0 +1,35 @@
+from pydantic_settings import BaseSettings
+from typing import List
+import json
+
+class Settings(BaseSettings):
+    # Database
+    DATABASE_URL: str
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "system_llm"
+
+    # Security
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
+    # Application
+    PROJECT_NAME: str = "System LLM"
+    API_V1_PREFIX: str = "/api/v1"
+    DEBUG: bool = False
+
+    # CORS
+    BACKEND_CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:8000"]'
+
+    @property
+    def cors_origins(self) -> List[str]:
+        """Parse CORS origins from JSON string"""
+        return json.loads(self.BACKEND_CORS_ORIGINS)
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+        extra = "ignore"  # Ignore extra fields from .env
+
+settings = Settings()

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: system-llm-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-system_llm}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - system-llm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: system-llm-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - system-llm-network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: system-llm-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app  # Mount for hot reload
+      - ./.env:/app/.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/system_llm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - system-llm-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  system-llm-network:
+    driver: bridge
