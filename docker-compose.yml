@@ -43,6 +43,7 @@ services:
     volumes:
       - ./app:/app/app  # Mount for hot reload
       - ./.env:/app/.env
+      - ./logs:/app/logs  # Mount logs directory
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/system_llm
     depends_on:

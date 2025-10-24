@@ -1,7 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.logging import setup_logging, get_logger
 from app.api.v1.endpoints import auth
+from app.middleware import RequestLoggingMiddleware, ErrorLoggingMiddleware
+
+# Setup logging first
+setup_logging()
+logger = get_logger(__name__)
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -12,6 +18,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Add logging middleware (order matters - add error logging first)
+app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Configure CORS
 app.add_middleware(
@@ -83,12 +93,12 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     """Run on application startup"""
-    print(f"🚀 {settings.PROJECT_NAME} is starting...")
-    print(f"📝 Documentation available at: http://localhost:8000/docs")
-    print(f"🔧 Debug mode: {settings.DEBUG}")
+    logger.info(f"🚀 {settings.PROJECT_NAME} is starting...")
+    logger.info(f"📝 Documentation available at: http://localhost:8000/docs")
+    logger.info(f"🔧 Debug mode: {settings.DEBUG}")
 
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown"""
-    print(f"👋 {settings.PROJECT_NAME} is shutting down...")
+    logger.info(f"👋 {settings.PROJECT_NAME} is shutting down...")
