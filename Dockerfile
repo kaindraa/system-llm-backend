@@ -27,6 +27,10 @@ RUN pip install --upgrade pip && \
 COPY ./app /app/app
 COPY .env /app/.env
 
+# Copy Alembic files for migrations
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
+
 # Expose port
 EXPOSE 8000
 

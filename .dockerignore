@@ -53,6 +53,3 @@ Thumbs.db
 # Uploads (when implemented)
 uploads/
 static/uploads/
-
-# Alembic (will be handled separately)
-alembic/versions/

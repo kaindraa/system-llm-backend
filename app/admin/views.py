@@ -50,9 +50,9 @@ class ModelAdmin(ModelView, model=Model):
     icon = "fa-solid fa-robot"
 
     # List view
-    column_list = [Model.id, Model.name, Model.display_name, Model.provider, Model.is_active, Model.created_at]
+    column_list = [Model.id, Model.name, Model.display_name, Model.provider, Model.created_at]
     column_searchable_list = [Model.name, Model.display_name, Model.provider]
-    column_sortable_list = [Model.name, Model.display_name, Model.provider, Model.is_active, Model.created_at]
+    column_sortable_list = [Model.name, Model.display_name, Model.provider, Model.created_at]
     column_default_sort = [(Model.created_at, True)]
 
     # Detail view
@@ -71,8 +71,6 @@ class ModelAdmin(ModelView, model=Model):
         Model.display_name: "Display Name",
         Model.provider: "Provider",
         Model.api_endpoint: "API Endpoint",
-        Model.is_active: "Active",
-        Model.config: "Configuration (JSON)",
         Model.created_at: "Created",
         Model.updated_at: "Updated",
     }
