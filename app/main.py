@@ -1,9 +1,21 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
+from sqladmin import Admin
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
+from app.core.database import engine
 from app.api.v1.endpoints import auth
 from app.middleware import RequestLoggingMiddleware, ErrorLoggingMiddleware
+from app.admin.auth import AdminAuthBackend
+from app.admin import (
+    UserAdmin,
+    ModelAdmin,
+    PromptAdmin,
+    DocumentAdmin,
+    DocumentChunkAdmin,
+    ChatSessionAdmin,
+)
 
 # Setup logging first
 setup_logging()
@@ -17,6 +29,14 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
+)
+
+# Add session middleware (required for SQLAdmin authentication)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SECRET_KEY,
+    session_cookie="admin_session",
+    max_age=3600,  # 1 hour
 )
 
 # Add logging middleware (order matters - add error logging first)
@@ -89,12 +109,31 @@ async def health_check():
             }
         }
 
+# Setup SQLAdmin
+authentication_backend = AdminAuthBackend(secret_key=settings.SECRET_KEY)
+admin = Admin(
+    app,
+    engine,
+    title="System LLM Admin",
+    base_url="/admin",
+    authentication_backend=authentication_backend,
+)
+
+# Register admin views
+admin.add_view(UserAdmin)
+admin.add_view(ModelAdmin)
+admin.add_view(PromptAdmin)
+admin.add_view(DocumentAdmin)
+admin.add_view(DocumentChunkAdmin)
+admin.add_view(ChatSessionAdmin)
+
 # Startup event
 @app.on_event("startup")
 async def startup_event():
     """Run on application startup"""
     logger.info(f"🚀 {settings.PROJECT_NAME} is starting...")
     logger.info(f"📝 Documentation available at: http://localhost:8000/docs")
+    logger.info(f"🔐 Admin panel available at: http://localhost:8000/admin")
     logger.info(f"🔧 Debug mode: {settings.DEBUG}")
 
 # Shutdown event

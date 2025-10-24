@@ -77,3 +77,6 @@ static/uploads/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+#Claude
+.claude/
