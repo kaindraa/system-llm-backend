@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # CORS
     BACKEND_CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:8000"]'
 
+    # LLM Configuration
+    OPENAI_API_KEY: str = ""
+    DEFAULT_LLM_MODEL: str = "gpt-5-mini"
+
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from JSON string"""

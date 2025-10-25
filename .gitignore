@@ -80,3 +80,6 @@ static/uploads/
 
 #Claude
 .claude/
+
+#Docs
+/docs

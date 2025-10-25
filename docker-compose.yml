@@ -46,6 +46,7 @@ services:
       - ./logs:/app/logs  # Mount logs directory
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/system_llm
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
