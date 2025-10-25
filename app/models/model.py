@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 import uuid
@@ -16,6 +17,9 @@ class Model(Base):
     api_endpoint = Column(String(500))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    chat_sessions = relationship("ChatSession", back_populates="model")
 
     def __repr__(self):
         return f"<Model {self.display_name}>"

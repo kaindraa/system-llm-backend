@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
 import uuid
@@ -45,6 +46,10 @@ class ChatSession(Base):
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     ended_at = Column(DateTime(timezone=True))
     analyzed_at = Column(DateTime(timezone=True))
+
+    # Relationships
+    user = relationship("User", back_populates="chat_sessions")
+    model = relationship("Model", back_populates="chat_sessions")
 
     def __repr__(self):
         return f"<ChatSession {self.id} - {self.title or 'Untitled'}>"

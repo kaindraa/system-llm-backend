@@ -52,7 +52,7 @@ async def login(
     - **email**: User email address
     - **password**: User password
 
-    Returns JWT access token valid for 30 minutes.
+    Returns JWT access token valid for 1 day (24 hours).
     """
     # Authenticate user
     user = auth_service.authenticate_user(db, login_data.email, login_data.password)
