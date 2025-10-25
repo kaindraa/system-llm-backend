@@ -114,8 +114,7 @@ class ChatSessionResponse(BaseModel):
     prompt_id: Optional[UUID] = Field(None, description="Prompt ID")
     title: Optional[str] = Field(None, description="Session title")
     status: str = Field(..., description="Session status")
-    total_user_msg: int = Field(..., description="Total user messages")
-    total_assistant_msg: int = Field(..., description="Total assistant messages")
+    total_messages: int = Field(..., description="Total messages in session")
     started_at: datetime = Field(..., description="When session started")
     ended_at: Optional[datetime] = Field(None, description="When session ended")
 
@@ -129,8 +128,7 @@ class ChatSessionResponse(BaseModel):
                 "prompt_id": None,
                 "title": "Learning Session",
                 "status": "active",
-                "total_user_msg": 5,
-                "total_assistant_msg": 5,
+                "total_messages": 10,
                 "started_at": "2025-01-25T10:00:00Z",
                 "ended_at": None
             }
@@ -154,8 +152,7 @@ class ChatSessionDetailResponse(ChatSessionResponse):
                 "prompt_id": None,
                 "title": "Learning Session",
                 "status": "active",
-                "total_user_msg": 1,
-                "total_assistant_msg": 1,
+                "total_messages": 4,
                 "started_at": "2025-01-25T10:00:00Z",
                 "ended_at": None,
                 "messages": [
@@ -230,8 +227,7 @@ class SessionListResponse(BaseModel):
                         "prompt_id": None,
                         "title": "Session 1",
                         "status": "active",
-                        "total_user_msg": 3,
-                        "total_assistant_msg": 3,
+                        "total_messages": 6,
                         "started_at": "2025-01-25T10:00:00Z",
                         "ended_at": None
                     }

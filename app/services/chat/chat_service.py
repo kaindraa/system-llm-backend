@@ -50,8 +50,7 @@ class ChatService:
             prompt_id=prompt_id,
             messages=[],
             status=SessionStatus.ACTIVE,
-            total_user_msg=0,
-            total_assistant_msg=0
+            total_messages=0
         )
 
         self.db.add(session)
@@ -183,8 +182,7 @@ class ChatService:
 
         session.messages.append(user_message)
         session.messages.append(assistant_message)
-        session.total_user_msg += 1
-        session.total_assistant_msg += 1
+        session.total_messages = len(session.messages)
 
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(session, "messages")

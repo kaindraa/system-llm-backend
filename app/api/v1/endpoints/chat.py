@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 
-from app.api.dependencies import get_db, get_current_user
+from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student
 from app.models.user import User
 from app.models.chat_session import SessionStatus
 from app.schemas.chat import (
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 async def create_chat_session(
     request: ChatSessionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student),
 ):
     """
     Create a new chat session.
@@ -43,7 +43,7 @@ async def create_chat_session(
     Creates a new conversation session with a specific LLM model.
     Optionally can use a system prompt from the database.
 
-    **Authentication required.**
+    **Student only.**
     """
     try:
         chat_service = ChatService(db=db)
@@ -77,7 +77,7 @@ async def list_chat_sessions(
     limit: int = 50,
     offset: int = 0,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student),
 ):
     """
     List all chat sessions for the current user.
@@ -85,7 +85,7 @@ async def list_chat_sessions(
     Returns sessions ordered by most recent first.
     Supports filtering by status and pagination.
 
-    **Authentication required.**
+    **Student only.**
     """
     try:
         chat_service = ChatService(db=db)
@@ -133,6 +133,9 @@ async def get_chat_session(
 
     Returns the session details including full conversation history.
 
+    Students can only view their own sessions.
+    Admins can view any session.
+
     **Authentication required.**
     """
     try:
@@ -166,14 +169,14 @@ async def update_chat_session(
     session_id: UUID,
     request: ChatSessionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin),
 ):
     """
     Update a chat session.
 
     Allows updating the title or status of a session.
 
-    **Authentication required.**
+    **Admin only.**
     """
     try:
         chat_service = ChatService(db=db)
@@ -217,14 +220,14 @@ async def update_chat_session(
 async def delete_chat_session(
     session_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_admin),
 ):
     """
     Delete a chat session.
 
     Permanently deletes the session and all its messages.
 
-    **Authentication required.**
+    **Admin only.**
     """
     try:
         chat_service = ChatService(db=db)
@@ -257,7 +260,7 @@ async def send_message(
     session_id: UUID,
     request: ChatRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_student),
 ):
     """
     Send a message in a chat session.
@@ -265,7 +268,7 @@ async def send_message(
     Sends a user message and receives an AI-generated response.
     Maintains conversation context (short-term memory).
 
-    **Authentication required.**
+    **Student only.**
     """
     try:
         chat_service = ChatService(db=db)

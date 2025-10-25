@@ -37,8 +37,7 @@ class ChatSession(Base):
     status = Column(SQLEnum(SessionStatus), default=SessionStatus.ACTIVE, index=True)
 
     # Analytics fields (Stage 9)
-    total_user_msg = Column(Integer, default=0)
-    total_assistant_msg = Column(Integer, default=0)
+    total_messages = Column(Integer, default=0)
     comprehension_level = Column(SQLEnum(ComprehensionLevel), nullable=True)
     summary = Column(Text)
 
