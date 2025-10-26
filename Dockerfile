@@ -23,11 +23,14 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Copy application code
-COPY ./app /app/app
-COPY .env /app/.env
+# Copy application code and project files
+COPY . /app/
 
-# Copy Alembic files for migrations
+# Set PYTHONPATH to include the app directory
+ENV PYTHONPATH=/app:$PYTHONPATH
+
+# Create required directories
+RUN mkdir -p /app/logs
 COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
 

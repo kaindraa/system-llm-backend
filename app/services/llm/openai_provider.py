@@ -145,6 +145,38 @@ class OpenAIProvider(BaseLLMProvider):
             self._client.temperature = original_temp
             self._client.max_tokens = original_max_tokens
 
+    async def agenerate_stream(self, messages: List[Dict[str, str]]):
+        """
+        Generate streaming response from OpenAI model (asynchronous).
+        Yields chunks of text as they are generated.
+
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+
+        Yields:
+            str: Text chunks as they are generated
+        """
+        # Convert messages to langchain format
+        langchain_messages = self._convert_messages(messages)
+
+        # Temporarily remove temperature to avoid sending it to API
+        original_temp = self._client.temperature
+        original_max_tokens = self._client.max_tokens
+
+        # Unset them (will not be sent to API)
+        self._client.temperature = 1
+        self._client.max_tokens = None
+
+        try:
+            # Stream response asynchronously with model defaults
+            async for chunk in self._client.astream(langchain_messages):
+                if chunk.content:
+                    yield chunk.content
+        finally:
+            # Restore original values
+            self._client.temperature = original_temp
+            self._client.max_tokens = original_max_tokens
+
     def get_provider_name(self) -> str:
         """Get provider name."""
         return "openai"

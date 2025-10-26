@@ -237,3 +237,95 @@ class ChatService:
             return None
 
         return session.messages
+
+    async def send_message_stream(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        message_content: str,
+        api_key: Optional[str] = None
+    ):
+        """
+        Send a message in a chat session and stream LLM response.
+        Yields chunks of the assistant's response as they are generated.
+
+        Args:
+            session_id: Chat session ID
+            user_id: User ID
+            message_content: User's message content
+            api_key: Optional API key for LLM provider
+
+        Yields:
+            Dict with 'type' and 'content':
+            - {'type': 'user_message', 'content': {...}}
+            - {'type': 'chunk', 'content': 'text chunk'}
+            - {'type': 'done', 'content': {...}}
+
+        Raises:
+            ValueError: If session not found or not active
+        """
+        session = self.get_session(session_id, user_id)
+        if not session:
+            raise ValueError(f"Session {session_id} not found")
+
+        if session.status != SessionStatus.ACTIVE:
+            raise ValueError(f"Session {session_id} is not active")
+
+        # Create user message
+        user_message = {
+            "role": "user",
+            "content": message_content,
+            "created_at": datetime.utcnow().isoformat(),
+            "sources": None
+        }
+
+        # Yield user message first
+        yield {"type": "user_message", "content": user_message}
+
+        # Build conversation context
+        conversation_context = self._build_conversation_context(session)
+        conversation_context.append({
+            "role": "user",
+            "content": message_content
+        })
+
+        logger.info(f"Session {session_id}: Streaming message to LLM (context: {len(conversation_context)} msgs)")
+
+        # Stream LLM response
+        full_content = ""
+        try:
+            async for chunk in self.llm_service.generate_stream(
+                model_id=str(session.model_id),
+                messages=conversation_context,
+                api_key=api_key
+            ):
+                full_content += chunk
+                yield {"type": "chunk", "content": chunk}
+
+        except Exception as e:
+            logger.error(f"LLM error in session {session_id}: {str(e)}")
+            raise
+
+        # Create assistant message with full content
+        assistant_message = {
+            "role": "assistant",
+            "content": full_content,
+            "created_at": datetime.utcnow().isoformat(),
+            "sources": None
+        }
+
+        # Save messages to database
+        session.messages.append(user_message)
+        session.messages.append(assistant_message)
+        session.total_messages = len(session.messages)
+
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(session, "messages")
+
+        self.db.commit()
+        self.db.refresh(session)
+
+        logger.info(f"Session {session_id}: Streaming completed (total: {len(session.messages)})")
+
+        # Yield done signal with assistant message
+        yield {"type": "done", "content": assistant_message}

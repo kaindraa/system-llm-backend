@@ -155,6 +155,28 @@ class LLMService:
         response = await provider.agenerate(messages=messages)
         return response
 
+    async def generate_stream(
+        self,
+        model_id: str,
+        messages: list[Dict[str, str]],
+        api_key: Optional[str] = None
+    ):
+        """
+        Generate streaming response using specified model (async).
+        Yields chunks of text as they are generated.
+
+        Args:
+            model_id: Model ID or name
+            messages: List of message dictionaries
+            api_key: API key for provider
+
+        Yields:
+            str: Text chunks as they are generated
+        """
+        provider = self.get_provider(model_id, api_key=api_key)
+        async for chunk in provider.agenerate_stream(messages=messages):
+            yield chunk
+
     def generate_sync(
         self,
         model_id: str,

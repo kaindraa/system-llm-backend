@@ -5,9 +5,11 @@ Provides REST API for chat session management and conversation.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
+import json
 
 from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student
 from app.models.user import User
@@ -255,7 +257,7 @@ async def delete_chat_session(
         )
 
 
-@router.post("/sessions/{session_id}/messages", response_model=ChatResponse)
+@router.post("/sessions/{session_id}/messages")
 async def send_message(
     session_id: UUID,
     request: ChatRequest,
@@ -263,44 +265,58 @@ async def send_message(
     current_user: User = Depends(get_current_student),
 ):
     """
-    Send a message in a chat session.
+    Send a message in a chat session with streaming response.
 
-    Sends a user message and receives an AI-generated response.
+    Sends a user message and streams back the AI-generated response in real-time.
     Maintains conversation context (short-term memory).
+
+    Returns Server-Sent Events (SSE) format:
+    - event: user_message - The user's message
+    - event: chunk - Text chunks as they are generated
+    - event: done - Final assistant message after completion
+    - event: error - Error information if something fails
 
     **Student only.**
     """
-    try:
-        chat_service = ChatService(db=db)
+    async def generate_stream():
+        try:
+            chat_service = ChatService(db=db)
 
-        logger.info(
-            f"User {current_user.email} sending message to session {session_id}"
-        )
+            logger.info(
+                f"User {current_user.email} sending streaming message to session {session_id}"
+            )
 
-        api_key = settings.OPENAI_API_KEY
+            api_key = settings.OPENAI_API_KEY
 
-        result = await chat_service.send_message(
-            session_id=session_id,
-            user_id=current_user.id,
-            message_content=request.message,
-            api_key=api_key
-        )
+            async for event in chat_service.send_message_stream(
+                session_id=session_id,
+                user_id=current_user.id,
+                message_content=request.message,
+                api_key=api_key
+            ):
+                event_type = event["type"]
+                content = event["content"]
 
-        return ChatResponse(
-            session_id=session_id,
-            user_message=ChatMessageResponse(**result["user_message"]),
-            assistant_message=ChatMessageResponse(**result["assistant_message"])
-        )
+                if event_type == "user_message":
+                    yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
+                elif event_type == "chunk":
+                    yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"
+                elif event_type == "done":
+                    yield f"event: done\ndata: {json.dumps(content)}\n\n"
 
-    except ValueError as e:
-        logger.error(f"Invalid request: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error sending message: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to send message: {str(e)}"
-        )
+        except ValueError as e:
+            logger.error(f"Invalid request: {str(e)}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e), 'status': 400})}\n\n"
+        except Exception as e:
+            logger.error(f"Error sending message: {str(e)}", exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'error': f'Failed to send message: {str(e)}', 'status': 500})}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )

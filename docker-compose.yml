@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -41,9 +39,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app  # Mount for hot reload
-      - ./.env:/app/.env
-      - ./logs:/app/logs  # Mount logs directory
+      - .:/app  # Mount entire project for development
+      - /app/logs  # Exclude logs directory from sync
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/system_llm
       - OPENAI_API_KEY=${OPENAI_API_KEY}
