@@ -73,6 +73,12 @@ async def login(
         }
     )
 
+    print(f"[DEBUG] [Login] Returning token to client:")
+    print(f"[DEBUG] [Login] Token type: {type(access_token)}")
+    print(f"[DEBUG] [Login] Token length: {len(access_token)}")
+    print(f"[DEBUG] [Login] Token first 50 chars: {access_token[:50]}...")
+    print(f"[DEBUG] [Login] Token last 20 chars: ...{access_token[-20:]}")
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 

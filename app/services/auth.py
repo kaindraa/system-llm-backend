@@ -27,7 +27,20 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire})
+
+    print(f"[DEBUG] ===== Token Creation =====")
+    print(f"[DEBUG] SECRET_KEY length: {len(settings.SECRET_KEY)}")
+    print(f"[DEBUG] SECRET_KEY: {settings.SECRET_KEY}")
+    print(f"[DEBUG] SECRET_KEY hex: {settings.SECRET_KEY.encode().hex()}")
+    print(f"[DEBUG] ALGORITHM: {settings.ALGORITHM}")
+    print(f"[DEBUG] Data to encode: {to_encode}")
+
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    print(f"[DEBUG] Token created, length: {len(encoded_jwt)}")
+    print(f"[DEBUG] Token first 50 chars: {encoded_jwt[:50]}...")
+    print(f"[DEBUG] Token last 20 chars: ...{encoded_jwt[-20:]}")
+    print(f"[DEBUG] ===== Token Creation End =====")
 
     return encoded_jwt
 

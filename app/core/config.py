@@ -37,3 +37,11 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra fields from .env
 
 settings = Settings()
+
+# DEBUG: Log settings on startup
+print(f"[DEBUG] [Config] Settings initialized")
+print(f"[DEBUG] [Config] SECRET_KEY length: {len(settings.SECRET_KEY)}")
+print(f"[DEBUG] [Config] SECRET_KEY: {settings.SECRET_KEY}")
+print(f"[DEBUG] [Config] SECRET_KEY hex: {settings.SECRET_KEY.encode().hex()}")
+print(f"[DEBUG] [Config] DATABASE_URL: {settings.DATABASE_URL[:50]}...")
+print(f"[DEBUG] [Config] ALGORITHM: {settings.ALGORITHM}")
