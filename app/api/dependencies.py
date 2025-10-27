@@ -29,17 +29,24 @@ async def get_current_user(
     try:
         # Decode JWT token
         token = credentials.credentials
+        print(f"[DEBUG] Token received: {token[:50]}...")
+        print(f"[DEBUG] SECRET_KEY: {settings.SECRET_KEY}")
+        print(f"[DEBUG] ALGORITHM: {settings.ALGORITHM}")
+
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM]
         )
+        print(f"[DEBUG] Token decoded successfully. Payload: {payload}")
         user_id: str = payload.get("user_id")
 
         if user_id is None:
+            print(f"[DEBUG] No user_id in token payload")
             raise credentials_exception
 
-    except JWTError:
+    except JWTError as e:
+        print(f"[DEBUG] JWTError: {str(e)}")
         raise credentials_exception
 
     # Get user from database
