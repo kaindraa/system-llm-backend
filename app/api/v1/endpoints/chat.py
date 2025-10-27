@@ -14,6 +14,8 @@ import json
 from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student
 from app.models.user import User
 from app.models.chat_session import SessionStatus
+from app.models.model import Model
+from app.models.prompt import Prompt
 from app.schemas.chat import (
     ChatSessionCreate,
     ChatSessionResponse,
@@ -23,6 +25,9 @@ from app.schemas.chat import (
     ChatResponse,
     SessionListResponse,
     ChatMessageResponse,
+    ConfigResponse,
+    ModelInfo,
+    PromptInfo,
 )
 from app.services.chat import ChatService
 from app.core.config import settings
@@ -48,6 +53,10 @@ async def create_chat_session(
     **Student only.**
     """
     try:
+        # DEBUG: Log incoming request
+        logger.info(f"[CREATE_SESSION] Request received from user {current_user.id}")
+        logger.info(f"[CREATE_SESSION] Request data: model_id={request.model_id}, title={request.title}, prompt_id={request.prompt_id}")
+
         chat_service = ChatService(db=db)
 
         session = chat_service.create_session(
@@ -56,6 +65,9 @@ async def create_chat_session(
             title=request.title,
             prompt_id=request.prompt_id
         )
+
+        # DEBUG: Log created session
+        logger.info(f"[CREATE_SESSION] Created session {session.id} with prompt_id={session.prompt_id}")
 
         return session
 
@@ -320,3 +332,52 @@ async def send_message(
             "X-Accel-Buffering": "no",  # Disable nginx buffering
         }
     )
+
+
+@router.get("/config", response_model=ConfigResponse)
+async def get_chat_config(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_student),
+):
+    """
+    Get chat configuration with available models and active prompt.
+
+    Returns all available models and the currently active system prompt.
+    This is used by the frontend to display options when creating a new chat.
+
+    **Student only.**
+    """
+    try:
+        # Get all models
+        models = db.query(Model).all()
+        model_infos = [
+            ModelInfo(
+                id=model.id,
+                name=model.name,
+                display_name=model.display_name,
+                provider=model.provider
+            )
+            for model in models
+        ]
+
+        # Get active prompt
+        active_prompt = db.query(Prompt).filter(Prompt.is_active == True).first()
+        active_prompt_info = None
+        if active_prompt:
+            active_prompt_info = PromptInfo(
+                id=active_prompt.id,
+                name=active_prompt.name,
+                description=active_prompt.description
+            )
+
+        return ConfigResponse(
+            models=model_infos,
+            active_prompt=active_prompt_info
+        )
+
+    except Exception as e:
+        logger.error(f"Error getting config: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get config: {str(e)}"
+        )

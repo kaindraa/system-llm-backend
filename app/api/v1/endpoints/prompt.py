@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from uuid import UUID
 
-from app.api.dependencies import get_db, get_current_admin
+from app.api.dependencies import get_db, get_current_admin, get_current_user
 from app.models.user import User
 from app.schemas.prompt import (
     PromptCreate,
@@ -99,14 +99,12 @@ async def list_prompts(
 async def get_prompt(
     prompt_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get a specific system prompt by ID.
 
-    Retrieves detailed information about a single prompt.
-
-    **Admin only.**
+    Retrieves detailed information about a single prompt. Requires authentication.
     """
     try:
         prompt_service = PromptService(db=db)
@@ -238,3 +236,4 @@ async def activate_prompt(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to activate prompt: {str(e)}"
         )
+

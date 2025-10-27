@@ -33,15 +33,28 @@ class ChatService:
         title: Optional[str] = None,
         prompt_id: Optional[UUID] = None
     ) -> ChatSession:
-        """Create a new chat session."""
+        """Create a new chat session.
+
+        If prompt_id is not provided, automatically uses the active prompt.
+        """
         model = self._get_model(model_id)
         if not model:
             raise ValueError(f"Model '{model_id}' not found")
 
-        if prompt_id:
+        # If no prompt_id provided, try to use active prompt
+        if not prompt_id:
+            active_prompt = self.db.query(Prompt).filter(Prompt.is_active == True).first()
+            if active_prompt:
+                prompt_id = active_prompt.id
+                logger.info(f"Using active prompt: {active_prompt.name} (ID: {prompt_id})")
+            else:
+                logger.info("No active prompt found, creating session without prompt")
+        else:
+            # Verify provided prompt exists
             prompt = self.db.query(Prompt).filter(Prompt.id == prompt_id).first()
             if not prompt:
                 raise ValueError(f"Prompt with ID '{prompt_id}' not found")
+            logger.info(f"Using provided prompt: {prompt.name} (ID: {prompt_id})")
 
         session = ChatSession(
             user_id=user_id,
@@ -57,7 +70,7 @@ class ChatService:
         self.db.commit()
         self.db.refresh(session)
 
-        logger.info(f"Created chat session {session.id} for user {user_id}")
+        logger.info(f"Created chat session {session.id} for user {user_id} with prompt_id={prompt_id}")
         return session
 
     def get_session(self, session_id: UUID, user_id: UUID) -> Optional[ChatSession]:

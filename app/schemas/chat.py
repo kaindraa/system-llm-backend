@@ -235,3 +235,43 @@ class SessionListResponse(BaseModel):
                 "total": 1
             }
         }
+
+
+class ModelInfo(BaseModel):
+    """Model information"""
+    id: UUID = Field(..., description="Model ID")
+    name: str = Field(..., description="Model name/identifier")
+    display_name: str = Field(..., description="Display name for UI")
+    provider: Optional[str] = Field(None, description="Provider (ollama, openai, etc.)")
+
+
+class PromptInfo(BaseModel):
+    """Prompt information"""
+    id: UUID = Field(..., description="Prompt ID")
+    name: str = Field(..., description="Prompt name")
+    description: Optional[str] = Field(None, description="Prompt description")
+
+
+class ConfigResponse(BaseModel):
+    """Configuration response with available models and active prompt"""
+    models: List[ModelInfo] = Field(..., description="List of available models")
+    active_prompt: Optional[PromptInfo] = Field(None, description="Currently active prompt")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "models": [
+                    {
+                        "id": "550e8400-e29b-41d4-a716-446655440000",
+                        "name": "gpt-4.1-nano",
+                        "display_name": "GPT-4.1 Nano",
+                        "provider": "openai"
+                    }
+                ],
+                "active_prompt": {
+                    "id": "660e8400-e29b-41d4-a716-446655440000",
+                    "name": "Default System Prompt",
+                    "description": "Default system prompt for general tasks"
+                }
+            }
+        }
