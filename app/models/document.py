@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Enum as SQLEnum, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -25,6 +25,7 @@ class Document(Base):
     file_path = Column(String(500), nullable=False)
     file_size = Column(BigInteger, nullable=False)
     mime_type = Column(String(100))
+    content = Column(Text)  # Raw extracted text from PDF (nullable until processed)
     status = Column(SQLEnum(DocumentStatus), default=DocumentStatus.UPLOADED, index=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True))

@@ -19,35 +19,18 @@ def seed_models(db: Session):
     """Seed default LLM models into the database."""
 
     # Default models to seed (OpenAI 2025 models)
-    # Model names use lowercase with dash format (e.g., gpt-5-mini) for API compatibility
+    # Model names use lowercase with dash format (e.g., gpt-4.1-nano) for API compatibility
+    # First model in list is the default for new chat sessions
     default_models = [
         {
-            "name": "gpt-5-mini",
-            "display_name": "GPT-5 Mini",
-            "provider": "openai",
-            "api_endpoint": "https://api.openai.com/v1/chat/completions",
-        },
-        {
-            "name": "gpt-5",
-            "display_name": "GPT-5",
-            "provider": "openai",
-            "api_endpoint": "https://api.openai.com/v1/chat/completions",
-        },
-        {
-            "name": "gpt-5-nano",
-            "display_name": "GPT-5 Nano",
+            "name": "gpt-4.1-nano",
+            "display_name": "GPT-4.1 Nano",
             "provider": "openai",
             "api_endpoint": "https://api.openai.com/v1/chat/completions",
         },
         {
             "name": "gpt-4.1",
             "display_name": "GPT-4.1",
-            "provider": "openai",
-            "api_endpoint": "https://api.openai.com/v1/chat/completions",
-        },
-        {
-            "name": "gpt-4.1-nano",
-            "display_name": "GPT-4.1 Nano",
             "provider": "openai",
             "api_endpoint": "https://api.openai.com/v1/chat/completions",
         },

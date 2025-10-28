@@ -348,8 +348,8 @@ async def get_chat_config(
     **Student only.**
     """
     try:
-        # Get all models
-        models = db.query(Model).all()
+        # Get all models, ordered by priority (lower order = higher priority)
+        models = db.query(Model).order_by(Model.order, Model.name).all()
         model_infos = [
             ModelInfo(
                 id=model.id,

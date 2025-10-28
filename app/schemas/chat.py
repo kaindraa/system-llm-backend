@@ -78,7 +78,7 @@ class ChatSessionCreate(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "model_id": "gpt-5-mini",
+                "model_id": "gpt-4.1-nano",
                 "title": "Learning about Machine Learning",
                 "prompt_id": None
             }

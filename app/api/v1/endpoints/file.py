@@ -6,10 +6,11 @@ Supports PDF file operations for learning materials.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File as FastAPIFile
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
 import uuid
+from io import BytesIO
 
 from app.api.dependencies import get_db, get_current_user
 from app.models.user import User
@@ -231,10 +232,10 @@ async def download_file(
 
         logger.info(f"File downloaded by user {current_user.id}: {file_id}")
 
-        return FileResponse(
-            content=content,
+        # Return file as streaming response
+        return StreamingResponse(
+            iter([content]),
             media_type=document.mime_type or "application/pdf",
-            filename=document.original_filename,
             headers={
                 "Content-Disposition": f"attachment; filename={document.original_filename}"
             }
