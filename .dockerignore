@@ -34,9 +34,7 @@ htmlcov
 docs/
 
 # Docker
-Dockerfile
 docker-compose.yml
-.dockerignore
 
 # Logs
 *.log
@@ -53,3 +51,16 @@ Thumbs.db
 # Uploads (when implemented)
 uploads/
 static/uploads/
+
+# Environment files (sensitive data)
+.env
+.env.local
+.env.*.local
+
+# CI/CD
+.github/
+
+# Development only
+node_modules/
+npm-debug.log
+yarn-error.log
