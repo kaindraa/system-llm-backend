@@ -24,7 +24,13 @@ from app.models import (
 config = context.config
 
 # Set database URL from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Properly handle URL encoding in ConfigParser
+from urllib.parse import quote_plus
+
+# If DATABASE_URL has special chars in password, it should already be URL-encoded
+# ConfigParser treats % specially, so we need to escape it
+db_url = settings.DATABASE_URL.replace("%", "%%")
+config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
