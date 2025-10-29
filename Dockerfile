@@ -40,9 +40,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Entrypoint script to handle initialization (migrations, admin creation)
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# Run initialization script then start the app
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Run FastAPI with uvicorn (NO --reload for production)
+# Cloud Run sets PORT env var (default 8080), fallback to 8000 for local
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
