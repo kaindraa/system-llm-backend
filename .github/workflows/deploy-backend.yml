@@ -36,13 +36,17 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
-      - name: Configure Docker
+      - name: Configure Docker to use gcloud
         run: gcloud auth configure-docker asia-southeast2-docker.pkg.dev
 
-      - name: Build Docker image
-        run: docker build -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:latest .
+      - name: Build Docker image with tags
+        run: |
+          docker build \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            .
 
-      - name: Push to Artifact Registry
+      - name: Push Docker image to Artifact Registry
         run: |
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           docker push ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:latest
@@ -50,9 +54,10 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --project ${{ env.PROJECT_ID }} \
             --region ${{ env.REGION }} \
             --platform managed \
+            --image ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             --allow-unauthenticated \
             --memory 1Gi \
             --cpu 1 \
