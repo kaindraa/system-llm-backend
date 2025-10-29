@@ -29,7 +29,13 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from JSON string"""
-        return json.loads(self.BACKEND_CORS_ORIGINS)
+        if not self.BACKEND_CORS_ORIGINS or self.BACKEND_CORS_ORIGINS.strip() == "":
+            return ["*"]  # Default to allow all if empty
+        try:
+            return json.loads(self.BACKEND_CORS_ORIGINS)
+        except json.JSONDecodeError:
+            # Fallback: if not valid JSON, treat as single origin
+            return [self.BACKEND_CORS_ORIGINS]
 
     class Config:
         env_file = ".env"

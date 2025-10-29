@@ -63,7 +63,7 @@ jobs:
             --cpu 1 \
             --max-instances 100 \
             --port 8080 \
-            --set-env-vars DATABASE_URL="${{ secrets.DATABASE_URL }}",SECRET_KEY="${{ secrets.SECRET_KEY }}",OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}",BACKEND_CORS_ORIGINS="${{ secrets.BACKEND_CORS_ORIGINS }}",DEBUG="false"
+            --set-env-vars DATABASE_URL="${{ secrets.DATABASE_URL }}",SECRET_KEY="${{ secrets.SECRET_KEY }}",OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}",BACKEND_CORS_ORIGINS='["http://localhost:3000","https://localhost:3000"]',DEBUG="false"
 
       - name: Verify deployment
         run: |
