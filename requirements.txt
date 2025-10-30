@@ -8,7 +8,6 @@ sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
 alembic==1.13.1
 pgvector==0.2.4
-cloud-sql-python-connector==1.18.5
 
 # Authentication & Security
 python-jose[cryptography]==3.3.0

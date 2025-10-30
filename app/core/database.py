@@ -2,46 +2,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
-import os
 
-# Check if running in Cloud Run (use Cloud SQL Connector)
-if os.getenv("K_SERVICE"):  # K_SERVICE env var is set in Cloud Run
-    from cloud_sql_python_connector import Connector
-
-    # Lazy load connector - only create when first connection needed
-    _connector = None
-
-    def getconn():
-        global _connector
-        if _connector is None:
-            _connector = Connector()
-        return _connector.connect(
-            "system-llm:asia-southeast2:system-llm-db",  # format: project:region:instance
-            "psycopg2",
-            user="llm_user",
-            password="anLLMUser123123",
-            db="system_llm"
-        )
-
-    engine = create_engine(
-        "postgresql+psycopg2://",
-        creator=getconn,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        pool_recycle=3600,
-        echo=settings.DEBUG
-    )
-else:
-    # Local development or direct connection
-    engine = create_engine(
-        settings.DATABASE_URL,
-        pool_pre_ping=True,  # Verify connections before using
-        pool_size=5,
-        max_overflow=10,
-        pool_recycle=3600,
-        echo=settings.DEBUG   # Log SQL queries in debug mode
-    )
+# Create database engine with connection pooling
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,      # Verify connections before using
+    pool_size=5,             # Connection pool size
+    max_overflow=10,         # Max overflow connections
+    pool_recycle=3600,       # Recycle connections every hour
+    connect_args={
+        "connect_timeout": 10,
+    },
+    echo=settings.DEBUG      # Log SQL queries in debug mode
+)
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
