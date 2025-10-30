@@ -19,9 +19,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      # Mount gcloud credentials from host to container
-      # Update path untuk gcloud credentials lokasi di machine Anda
-      - C:/Users/pcgsa/AppData/Roaming/gcloud/application_default_credentials.json:/credentials.json:ro
+      # Mount gcloud credentials dari host ke container
+      # Lokasi default: ~/.config/gcloud/application_default_credentials.json
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-.gcloud/credentials.json}:/credentials.json:ro
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /credentials.json
     # Requires gcloud authentication on host
@@ -66,8 +66,6 @@ services:
       - API_V1_PREFIX=${API_V1_PREFIX:-/api/v1}
       - DEBUG=${DEBUG:-True}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:8000"]}
-      # Skip proxy startup since we have separate proxy container
-      - SKIP_PROXY=true
       - CLOUD_SQL_INSTANCES=system-llm:asia-southeast2:system-llm-db
     depends_on:
       - cloud-sql-proxy
