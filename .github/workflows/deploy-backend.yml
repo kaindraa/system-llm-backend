@@ -62,7 +62,8 @@ jobs:
             --memory 1Gi \
             --cpu 1 \
             --max-instances 100 \
-            --set-env-vars 'DATABASE_URL=${{ secrets.DATABASE_URL }},SECRET_KEY=${{ secrets.SECRET_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},BACKEND_CORS_ORIGINS=["https://system-llm-chat.fly.dev"],DEBUG=false'
+            --add-cloudsql-instances '${{ env.PROJECT_ID }}:${{ env.REGION }}:system-llm-db' \
+            --set-env-vars 'INSTANCE_UNIX_SOCKET=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:system-llm-db,SECRET_KEY=${{ secrets.SECRET_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},BACKEND_CORS_ORIGINS=["https://system-llm-chat.fly.dev"],DEBUG=false'
 
       - name: Verify deployment
         run: |
