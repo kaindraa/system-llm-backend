@@ -55,7 +55,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-system_llm}
       - PROJECT_NAME=${PROJECT_NAME:-System LLM}
       - API_V1_PREFIX=${API_V1_PREFIX:-/api/v1}
-      - DEBUG=${DEBUG:-false}
+      - DEBUG=${DEBUG:-True}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:8000"]}
     depends_on:
       postgres:
