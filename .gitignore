@@ -83,3 +83,6 @@ static/uploads/
 
 #Docs
 /docs
+
+system_llm_backup.sql
+*.sql
