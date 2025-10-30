@@ -58,11 +58,12 @@ jobs:
             --region ${{ env.REGION }} \
             --platform managed \
             --image ${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            --add-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:system-llm-db \
             --allow-unauthenticated \
             --memory 1Gi \
             --cpu 1 \
             --max-instances 100 \
-            --set-env-vars 'DATABASE_URL=${{ secrets.DATABASE_URL }},SECRET_KEY=${{ secrets.SECRET_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},BACKEND_CORS_ORIGINS=["https://system-llm-chat.fly.dev"],DEBUG=false'
+            --set-env-vars DATABASE_URL='${{ secrets.DATABASE_URL }}',SECRET_KEY='${{ secrets.SECRET_KEY }}',OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}',BACKEND_CORS_ORIGINS='${{ secrets.BACKEND_CORS_ORIGINS }}',DEBUG=false,CLOUD_SQL_INSTANCES='${{ env.PROJECT_ID }}:${{ env.REGION }}:system-llm-db'
 
       - name: Verify deployment
         run: |

@@ -10,12 +10,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies (including wget for downloading cloud-sql-proxy)
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Download Cloud SQL Proxy v2.18.2
+RUN mkdir -p /opt/cloud-sql-proxy && \
+    wget -q https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.2/cloud-sql-proxy.linux.amd64 \
+    -O /opt/cloud-sql-proxy/cloud-sql-proxy && \
+    chmod +x /opt/cloud-sql-proxy/cloud-sql-proxy
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -33,6 +40,10 @@ ENV PYTHONPATH=/app:$PYTHONPATH
 # Create required directories
 RUN mkdir -p /app/logs
 
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Expose port (Cloud Run uses PORT env variable, default 8000)
 EXPOSE 8000
 
@@ -40,6 +51,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Run FastAPI with uvicorn (NO --reload for production)
-# Cloud Run sets PORT env var (default 8080), fallback to 8000 for local
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run entrypoint script that manages both Cloud SQL Proxy and FastAPI
+ENTRYPOINT ["/app/entrypoint.sh"]
