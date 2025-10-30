@@ -21,7 +21,7 @@ pydantic==2.5.3
 email-validator==2.1.0
 
 # Admin Panel
-sqladmin==0.16.1
+sqladmin==0.19.5
 itsdangerous==2.1.2
 
 # Utilities
