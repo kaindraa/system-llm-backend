@@ -8,10 +8,14 @@ import os
 if os.getenv("K_SERVICE"):  # K_SERVICE env var is set in Cloud Run
     from cloud_sql_python_connector import Connector
 
-    connector = Connector()
+    # Lazy load connector - only create when first connection needed
+    _connector = None
 
     def getconn():
-        return connector.connect(
+        global _connector
+        if _connector is None:
+            _connector = Connector()
+        return _connector.connect(
             "system-llm:asia-southeast2:system-llm-db",  # format: project:region:instance
             "psycopg2",
             user="llm_user",
