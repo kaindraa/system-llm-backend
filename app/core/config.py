@@ -1,10 +1,10 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 import json
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: Optional[str] = None  # Optional - used for direct connection, not needed with Unix socket
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "system_llm"
