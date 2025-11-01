@@ -2,8 +2,8 @@
 File Storage Service
 
 Provides abstraction layer for file storage operations.
-Currently implements LocalFileStorage for development.
-Can be extended to support cloud storage (S3, Azure, etc.) in the future.
+Currently implements LocalFileStorage and GCSStorageProvider.
+Can be extended to support other cloud storage services (S3, Azure, etc.).
 """
 
 from abc import ABC, abstractmethod
@@ -14,6 +14,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models.document import Document, DocumentStatus
 from app.core.logging import get_logger
+from google.cloud import storage as gcs_storage
+from google.oauth2 import service_account
 
 logger = get_logger(__name__)
 
@@ -156,8 +158,131 @@ class LocalFileStorage(FileStorageProvider):
         return self._get_file_path(file_id).exists()
 
 
-# Global instance - will be initialized in main.py or config
-storage_provider: FileStorageProvider = LocalFileStorage()
+class GCSStorageProvider(FileStorageProvider):
+    """Google Cloud Storage provider"""
+
+    def __init__(self, bucket_name: str, credentials_path: str = None, project_id: str = None):
+        """
+        Initialize Google Cloud Storage provider.
+
+        Args:
+            bucket_name: GCS bucket name (e.g., 'gs://system-llm-storage')
+            credentials_path: Path to service account JSON credentials file
+            project_id: GCP project ID
+        """
+        # Remove 'gs://' prefix if present
+        if bucket_name.startswith('gs://'):
+            bucket_name = bucket_name[5:]
+
+        self.bucket_name = bucket_name
+        self.project_id = project_id
+
+        try:
+            # Initialize GCS client
+            if credentials_path and os.path.exists(credentials_path):
+                # Use service account credentials from file
+                credentials = service_account.Credentials.from_service_account_file(
+                    credentials_path
+                )
+                self.client = gcs_storage.Client(
+                    credentials=credentials,
+                    project=project_id or credentials.project_id
+                )
+                logger.info(f"GCSStorageProvider initialized with credentials from {credentials_path}")
+            else:
+                # Use default application credentials (e.g., from Cloud Run environment)
+                self.client = gcs_storage.Client(project=project_id)
+                logger.info("GCSStorageProvider initialized with default application credentials")
+
+            self.bucket = self.client.bucket(self.bucket_name)
+
+            # Verify bucket exists
+            if not self.bucket.exists():
+                raise ValueError(f"GCS bucket does not exist: {self.bucket_name}")
+
+            logger.info(f"GCSStorageProvider initialized with bucket: {self.bucket_name}")
+
+        except Exception as e:
+            logger.error(f"Error initializing GCSStorageProvider: {str(e)}")
+            raise
+
+    def _get_blob_name(self, file_id: str) -> str:
+        """Get GCS blob name for given file_id"""
+        return f"uploads/{file_id}.pdf"
+
+    def save(self, file_id: str, content: bytes) -> str:
+        """Save file to GCS"""
+        try:
+            blob_name = self._get_blob_name(file_id)
+            blob = self.bucket.blob(blob_name)
+
+            # Upload file to GCS
+            blob.upload_from_string(
+                content,
+                content_type='application/pdf'
+            )
+
+            logger.info(f"File saved successfully to GCS: {file_id} at gs://{self.bucket_name}/{blob_name}")
+
+            # Return GCS path for storage in database
+            return f"gs://{self.bucket_name}/{blob_name}"
+
+        except Exception as e:
+            logger.error(f"Error saving file to GCS {file_id}: {str(e)}")
+            raise
+
+    def get(self, file_id: str) -> bytes:
+        """Retrieve file from GCS"""
+        try:
+            blob_name = self._get_blob_name(file_id)
+            blob = self.bucket.blob(blob_name)
+
+            if not blob.exists():
+                raise FileNotFoundError(f"File not found in GCS: {file_id}")
+
+            # Download file content
+            content = blob.download_as_bytes()
+
+            logger.info(f"File retrieved successfully from GCS: {file_id}")
+            return content
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error retrieving file from GCS {file_id}: {str(e)}")
+            raise
+
+    def delete(self, file_id: str) -> None:
+        """Delete file from GCS"""
+        try:
+            blob_name = self._get_blob_name(file_id)
+            blob = self.bucket.blob(blob_name)
+
+            if not blob.exists():
+                raise FileNotFoundError(f"File not found in GCS: {file_id}")
+
+            blob.delete()
+            logger.info(f"File deleted successfully from GCS: {file_id}")
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting file from GCS {file_id}: {str(e)}")
+            raise
+
+    def exists(self, file_id: str) -> bool:
+        """Check if file exists in GCS"""
+        try:
+            blob_name = self._get_blob_name(file_id)
+            blob = self.bucket.blob(blob_name)
+            return blob.exists()
+        except Exception as e:
+            logger.error(f"Error checking file existence in GCS {file_id}: {str(e)}")
+            return False
+
+
+# Global instance - will be initialized in main.py based on config
+storage_provider: FileStorageProvider = None
 
 
 class FileService:
@@ -355,3 +480,34 @@ class FileService:
             self.db.rollback()
             self.logger.error(f"Error updating file status: {str(e)}")
             raise
+
+
+def initialize_storage_provider(config) -> FileStorageProvider:
+    """
+    Initialize storage provider based on configuration.
+
+    Args:
+        config: Settings object from app.core.config
+
+    Returns:
+        Initialized FileStorageProvider instance
+    """
+    global storage_provider
+
+    storage_type = config.STORAGE_TYPE.lower()
+
+    if storage_type == "gcs":
+        logger.info("Initializing GCS storage provider")
+        if not config.GCS_BUCKET_NAME:
+            raise ValueError("GCS_BUCKET_NAME not configured")
+
+        storage_provider = GCSStorageProvider(
+            bucket_name=config.GCS_BUCKET_NAME,
+            credentials_path=config.GCS_CREDENTIALS_PATH if config.GCS_CREDENTIALS_PATH else None,
+            project_id=config.GCS_PROJECT_ID if config.GCS_PROJECT_ID else None
+        )
+    else:
+        logger.info("Initializing local file storage provider")
+        storage_provider = LocalFileStorage()
+
+    return storage_provider

@@ -11,11 +11,8 @@ echo "Database URL: ${DATABASE_URL}"
 echo "Cloud SQL Instance: ${CLOUD_SQL_INSTANCES}"
 echo "Port: ${PORT:-8000}"
 
-# Extract Cloud SQL instance from DATABASE_URL if CLOUD_SQL_INSTANCES not set
-if [ -z "$CLOUD_SQL_INSTANCES" ]; then
-    # Fallback if no CLOUD_SQL_INSTANCES env var
-    echo "Warning: CLOUD_SQL_INSTANCES not set"
-else
+# Start Cloud SQL Proxy if CLOUD_SQL_INSTANCES is set
+if [ -n "$CLOUD_SQL_INSTANCES" ]; then
     echo "Starting Cloud SQL Proxy for: ${CLOUD_SQL_INSTANCES}"
 
     # Start Cloud SQL Proxy in background
@@ -36,6 +33,8 @@ else
         echo "Error: Cloud SQL Proxy failed to start"
         exit 1
     fi
+else
+    echo "Warning: CLOUD_SQL_INSTANCES not set - proxy will not start"
 fi
 
 echo "Starting FastAPI application..."

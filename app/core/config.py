@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-5-mini"
 
+    # Cloud Storage Configuration
+    STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
+    GCS_BUCKET_NAME: str = ""
+    GCS_PROJECT_ID: str = ""
+    GCS_CREDENTIALS_PATH: str = ""  # Path to JSON credentials file
+
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from JSON string"""

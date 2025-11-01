@@ -22,7 +22,8 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /opt/cloud-sql-proxy && \
     wget -q https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.2/cloud-sql-proxy.linux.amd64 \
     -O /opt/cloud-sql-proxy/cloud-sql-proxy && \
-    chmod +x /opt/cloud-sql-proxy/cloud-sql-proxy
+    chmod +x /opt/cloud-sql-proxy/cloud-sql-proxy && \
+    echo "Cloud SQL Proxy installed"
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -38,7 +39,7 @@ COPY . /app/
 ENV PYTHONPATH=/app:$PYTHONPATH
 
 # Create required directories
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs /app/credentials /app/storage/uploads
 
 # Copy entrypoint script
 COPY entrypoint.sh /app/entrypoint.sh

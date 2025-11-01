@@ -53,6 +53,8 @@ services:
       - /app/logs
       # Mount gcloud credentials dari host ke container
       - "C:\\Users\\pcgsa\\AppData\\Roaming\\gcloud\\application_default_credentials.json:/credentials.json:ro"
+      # Mount GCS credentials
+      - ./system-llm-storage-key.json:/app/credentials/system-llm-storage-key.json:ro
     env_file:
       - .env
     environment:
@@ -72,6 +74,11 @@ services:
       - CLOUD_SQL_INSTANCES=system-llm:asia-southeast2:system-llm-db
       # Point to credentials file di dalam container (sudah di-mount)
       - GOOGLE_APPLICATION_CREDENTIALS=/credentials.json
+      # GCS Configuration
+      - STORAGE_TYPE=gcs
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/credentials/system-llm-storage-key.json
     depends_on:
       - cloud-sql-proxy
     networks:

@@ -1,0 +1,130 @@
+# Docker Compose configuration for GCS integration
+# Usage: docker-compose -f docker-compose.gcs.yml up
+#
+# This configuration shows how to properly mount GCS credentials
+# and configure the backend to use Google Cloud Storage
+
+version: '3.8'
+
+services:
+  system-llm-db:
+    image: pgvector/pgvector:pg16-latest
+    container_name: system-llm-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: system_llm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - system-llm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: system-llm-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - system-llm-db
+    networks:
+      - system-llm-network
+
+  system-llm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: system-llm-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql://postgres:postgres@system-llm-db:5432/system_llm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: system_llm
+
+      # Security
+      SECRET_KEY: your-secret-key-change-this-in-production
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+
+      # Application Settings
+      PROJECT_NAME: System LLM
+      API_V1_PREFIX: /api/v1
+      DEBUG: "true"
+
+      # CORS
+      BACKEND_CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
+
+      # LLM Configuration
+      OPENAI_API_KEY: your-openai-api-key-here
+      DEFAULT_LLM_MODEL: gpt-4-mini
+
+      # ========================================
+      # GCS (Google Cloud Storage) Configuration
+      # ========================================
+      STORAGE_TYPE: gcs
+      GCS_BUCKET_NAME: system-llm-storage
+      GCS_PROJECT_ID: system-llm
+      GCS_CREDENTIALS_PATH: /app/credentials/system-llm-storage-key.json
+
+    volumes:
+      # Mount GCS credentials file (read-only)
+      # IMPORTANT: Make sure the file path matches your actual location
+      - ./system-llm-storage-key.json:/app/credentials/system-llm-storage-key.json:ro
+
+      # Mount logs directory (optional)
+      - ./logs:/app/logs
+
+    depends_on:
+      system-llm-db:
+        condition: service_healthy
+
+    networks:
+      - system-llm-network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  system-llm-network:
+    driver: bridge
+
+# IMPORTANT SETUP INSTRUCTIONS:
+#
+# 1. Copy credentials file to project root:
+#    cp /path/to/system-llm-storage-key.json ./system-llm-storage-key.json
+#
+# 2. Verify the file exists:
+#    ls -l system-llm-storage-key.json
+#
+# 3. Run with this compose file:
+#    docker-compose -f docker-compose.gcs.yml up
+#
+# 4. Test GCS integration:
+#    python test_gcs_integration.py --mode=all
+#
+# NOTES:
+# - The credentials file is mounted as read-only (:ro) for security
+# - Update GCS_BUCKET_NAME if using a different bucket
+# - Update GCS_PROJECT_ID if using a different GCP project
+# - For production, use Cloud Run secrets instead of file mounting

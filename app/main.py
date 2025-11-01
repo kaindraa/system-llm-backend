@@ -16,6 +16,7 @@ from app.admin import (
     DocumentChunkAdmin,
     ChatSessionAdmin,
 )
+from app.services.file_service import initialize_storage_provider
 
 # Setup logging first
 setup_logging()
@@ -140,6 +141,14 @@ async def startup_event():
     logger.info(f"📝 Documentation available at: http://localhost:8000/docs")
     logger.info(f"🔐 Admin panel available at: http://localhost:8000/admin")
     logger.info(f"🔧 Debug mode: {settings.DEBUG}")
+
+    # Initialize storage provider based on configuration
+    try:
+        initialize_storage_provider(settings)
+        logger.info(f"✅ Storage provider initialized: {settings.STORAGE_TYPE}")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize storage provider: {str(e)}")
+        raise
 
 # Shutdown event
 @app.on_event("shutdown")
