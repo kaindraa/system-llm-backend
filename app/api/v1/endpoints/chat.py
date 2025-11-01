@@ -6,7 +6,7 @@ Provides REST API for chat session management and conversation.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from uuid import UUID
 import json
@@ -298,7 +298,30 @@ async def send_message(
                 f"User {current_user.email} sending streaming message to session {session_id}"
             )
 
-            api_key = settings.OPENAI_API_KEY
+            # Get session to determine which model/provider is being used
+            # Use eager loading to fetch model relationship
+            from app.models.chat_session import ChatSession
+            session = db.query(ChatSession).options(
+                joinedload(ChatSession.model)
+            ).filter(
+                ChatSession.id == session_id,
+                ChatSession.user_id == current_user.id
+            ).first()
+
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+
+            # Get appropriate API key based on model provider
+            api_key = None
+            if session.model:
+                provider_name = session.model.provider.lower()
+                api_key_mapping = {
+                    "openai": settings.OPENAI_API_KEY,
+                    "anthropic": settings.ANTHROPIC_API_KEY,
+                    "google": settings.GOOGLE_API_KEY,
+                }
+                api_key = api_key_mapping.get(provider_name)
+                logger.info(f"Using {provider_name} provider with API key")
 
             async for event in chat_service.send_message_stream(
                 session_id=session_id,

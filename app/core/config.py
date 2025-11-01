@@ -24,12 +24,14 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-5-mini"
 
     # Cloud Storage Configuration
     STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
-    GCS_BUCKET_NAME: str = ""
-    GCS_PROJECT_ID: str = ""
+    GCS_BUCKET_NAME: str = "system-llm-storage"
+    GCS_PROJECT_ID: str = "system-llm"
     GCS_CREDENTIALS_PATH: Optional[str] = None  # Path to JSON credentials file (optional, uses ADC/IAM if None)
 
     @property

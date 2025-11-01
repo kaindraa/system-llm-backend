@@ -2,8 +2,11 @@ from typing import Dict, Any, Optional, Type
 from sqlalchemy.orm import Session
 from app.services.llm.base import BaseLLMProvider
 from app.services.llm.openai_provider import OpenAIProvider
+from app.services.llm.anthropic_provider import AnthropicProvider
+from app.services.llm.google_provider import GoogleProvider
 from app.models.model import Model
 from app.core.logging import get_logger
+from app.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -17,9 +20,10 @@ class LLMService:
     # Registry of available providers
     PROVIDER_REGISTRY: Dict[str, Type[BaseLLMProvider]] = {
         "openai": OpenAIProvider,
+        "anthropic": AnthropicProvider,
+        "google": GoogleProvider,
         # Future providers can be added here:
         # "ollama": OllamaProvider,
-        # "anthropic": AnthropicProvider,
         # "huggingface": HuggingFaceProvider,
     }
 
@@ -87,8 +91,20 @@ class LLMService:
 
         # Create provider instance
         provider_kwargs = kwargs.copy()
+
+        # Get API key from parameter or settings
         if api_key:
             provider_kwargs["api_key"] = api_key
+        else:
+            # Try to get API key from config settings
+            api_key_config = {
+                "openai": settings.OPENAI_API_KEY,
+                "anthropic": settings.ANTHROPIC_API_KEY,
+                "google": settings.GOOGLE_API_KEY,
+            }
+            config_key = api_key_config.get(provider_name)
+            if config_key:
+                provider_kwargs["api_key"] = config_key
 
         # For OpenAI, don't pass base_url as langchain handles it
         # For other providers, pass custom endpoints
