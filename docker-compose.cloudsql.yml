@@ -20,8 +20,9 @@ services:
       - "5432:5432"
     volumes:
       # Mount gcloud credentials dari host ke container
-      # Lokasi default: ~/.config/gcloud/application_default_credentials.json
-      - ${GOOGLE_APPLICATION_CREDENTIALS:-.gcloud/credentials.json}:/credentials.json:ro
+      # Path host: C:\Users\pcgsa\AppData\Roaming\gcloud\application_default_credentials.json
+      # Path container: /credentials.json
+      - "C:\\Users\\pcgsa\\AppData\\Roaming\\gcloud\\application_default_credentials.json:/credentials.json:ro"
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /credentials.json
     # Requires gcloud authentication on host
@@ -50,6 +51,8 @@ services:
     volumes:
       - .:/app
       - /app/logs
+      # Mount gcloud credentials dari host ke container
+      - "C:\\Users\\pcgsa\\AppData\\Roaming\\gcloud\\application_default_credentials.json:/credentials.json:ro"
     env_file:
       - .env
     environment:
@@ -67,6 +70,8 @@ services:
       - DEBUG=${DEBUG:-True}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:8000"]}
       - CLOUD_SQL_INSTANCES=system-llm:asia-southeast2:system-llm-db
+      # Point to credentials file di dalam container (sudah di-mount)
+      - GOOGLE_APPLICATION_CREDENTIALS=/credentials.json
     depends_on:
       - cloud-sql-proxy
     networks:
