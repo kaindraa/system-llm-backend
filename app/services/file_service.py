@@ -494,20 +494,52 @@ def initialize_storage_provider(config) -> FileStorageProvider:
     """
     global storage_provider
 
+    # Log configuration for debugging
+    logger.info("="*60)
+    logger.info("STORAGE PROVIDER INITIALIZATION")
+    logger.info("="*60)
+    logger.info(f"[CONFIG] STORAGE_TYPE: {config.STORAGE_TYPE}")
+    logger.info(f"[CONFIG] GCS_BUCKET_NAME: {config.GCS_BUCKET_NAME}")
+    logger.info(f"[CONFIG] GCS_PROJECT_ID: {config.GCS_PROJECT_ID}")
+    logger.info(f"[CONFIG] GCS_CREDENTIALS_PATH: {config.GCS_CREDENTIALS_PATH}")
+
     storage_type = config.STORAGE_TYPE.lower()
+    logger.info(f"[DECISION] Storage type (lowercase): '{storage_type}'")
 
     if storage_type == "gcs":
-        logger.info("Initializing GCS storage provider")
+        logger.info("[CHOICE] Selected: GCS Storage Provider")
+        logger.info(f"[VALIDATION] Checking GCS_BUCKET_NAME: {'PRESENT' if config.GCS_BUCKET_NAME else 'EMPTY'}")
+
         if not config.GCS_BUCKET_NAME:
+            logger.error("[ERROR] GCS_BUCKET_NAME is not configured!")
             raise ValueError("GCS_BUCKET_NAME not configured")
 
-        storage_provider = GCSStorageProvider(
-            bucket_name=config.GCS_BUCKET_NAME,
-            credentials_path=config.GCS_CREDENTIALS_PATH if config.GCS_CREDENTIALS_PATH else None,
-            project_id=config.GCS_PROJECT_ID if config.GCS_PROJECT_ID else None
-        )
-    else:
-        logger.info("Initializing local file storage provider")
-        storage_provider = LocalFileStorage()
+        logger.info(f"[VALIDATION] GCS_CREDENTIALS_PATH: {config.GCS_CREDENTIALS_PATH if config.GCS_CREDENTIALS_PATH else 'None (will use ADC/IAM)'}")
+        logger.info(f"[VALIDATION] GCS_PROJECT_ID: {config.GCS_PROJECT_ID if config.GCS_PROJECT_ID else 'Not set'}")
 
+        try:
+            logger.info("[INIT] Creating GCSStorageProvider instance...")
+            storage_provider = GCSStorageProvider(
+                bucket_name=config.GCS_BUCKET_NAME,
+                credentials_path=config.GCS_CREDENTIALS_PATH if config.GCS_CREDENTIALS_PATH else None,
+                project_id=config.GCS_PROJECT_ID if config.GCS_PROJECT_ID else None
+            )
+            logger.info("[SUCCESS] GCSStorageProvider initialized successfully")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to initialize GCSStorageProvider: {str(e)}")
+            raise
+    else:
+        logger.info(f"[CHOICE] Selected: Local File Storage Provider")
+        logger.info(f"[REASON] STORAGE_TYPE is '{storage_type}' (not 'gcs'), defaulting to local storage")
+        try:
+            logger.info("[INIT] Creating LocalFileStorage instance...")
+            storage_provider = LocalFileStorage()
+            logger.info("[SUCCESS] LocalFileStorage initialized successfully")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to initialize LocalFileStorage: {str(e)}")
+            raise
+
+    logger.info("="*60)
+    logger.info(f"✅ Storage provider initialized: {storage_provider.__class__.__name__}")
+    logger.info("="*60)
     return storage_provider
