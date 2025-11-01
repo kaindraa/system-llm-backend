@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 import json
 
 class Settings(BaseSettings):
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
     GCS_BUCKET_NAME: str = ""
     GCS_PROJECT_ID: str = ""
-    GCS_CREDENTIALS_PATH: str = ""  # Path to JSON credentials file
+    GCS_CREDENTIALS_PATH: Optional[str] = None  # Path to JSON credentials file (optional, uses ADC/IAM if None)
 
     @property
     def cors_origins(self) -> List[str]:
