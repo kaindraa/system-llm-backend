@@ -12,7 +12,7 @@ from uuid import UUID
 import uuid
 from io import BytesIO
 
-from app.api.dependencies import get_db, get_current_user
+from app.api.dependencies import get_db, get_current_user, get_current_admin
 from app.models.user import User
 from app.models.document import DocumentStatus
 from app.schemas.file import (
@@ -106,7 +106,7 @@ async def upload_file(
 @router.get(
     "",
     response_model=FileListResponse,
-    summary="List user's uploaded files"
+    summary="List all files in the system"
 )
 async def list_files(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
@@ -116,21 +116,20 @@ async def list_files(
     current_user: User = Depends(get_current_user),
 ):
     """
-    List all files uploaded by the current user with pagination.
+    List ALL files in the system with pagination.
 
     Query Parameters:
     - **skip**: Number of records to skip (for pagination)
     - **limit**: Maximum number of records to return (1-100)
     - **status**: Optional filter by document status (uploaded, processing, processed, failed)
 
-    Returns list of files ordered by upload date (newest first).
+    Returns list of all files ordered by upload date (newest first).
 
-    **Requires authentication.**
+    **Requires authentication. All authenticated users can see all files.**
     """
     try:
         file_service = FileService(db=db)
-        documents, total = file_service.list_files(
-            user_id=current_user.id,
+        documents, total = file_service.list_all_files(
             skip=skip,
             limit=limit,
             status=status
@@ -168,19 +167,13 @@ async def get_file_detail(
 
     Returns file metadata including upload date and processing status.
 
-    **Requires authentication.**
+    **Requires authentication. All users can access any file.**
     """
     try:
         file_service = FileService(db=db)
         document = file_service.get_file(str(file_id))
 
-        # Verify ownership
-        if document.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to access this file"
-            )
-
+        # Allow all authenticated users to read file details
         return FileDetailResponse.model_validate(document)
 
     except FileNotFoundError:
@@ -214,19 +207,13 @@ async def download_file(
 
     Returns the PDF file as binary response for download.
 
-    **Requires authentication.**
+    **Requires authentication. All users can download any file.**
     """
     try:
         file_service = FileService(db=db)
         document = file_service.get_file(str(file_id))
 
-        # Verify ownership
-        if document.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to access this file"
-            )
-
+        # Allow all authenticated users to download files
         # Get file content
         content = file_service.get_file_content(str(file_id))
 
@@ -264,28 +251,20 @@ async def download_file(
 async def delete_file(
     file_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_admin: User = Depends(get_current_admin),
 ):
     """
     Delete a file (removes from both storage and database).
 
     - **file_id**: UUID of the file
 
-    **Requires authentication and file ownership.**
+    **Requires ADMIN role only.**
     """
     try:
         file_service = FileService(db=db)
 
-        # Verify ownership by fetching first
-        document = file_service.get_file(str(file_id))
-        if document.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to delete this file"
-            )
-
-        # Delete file
-        deleted = file_service.delete_file(str(file_id), user_id=current_user.id)
+        # Delete file (admin can delete any file)
+        deleted = file_service.delete_file(str(file_id), user_id=None)
 
         if not deleted:
             raise HTTPException(
@@ -293,7 +272,7 @@ async def delete_file(
                 detail=f"File with ID '{file_id}' not found"
             )
 
-        logger.info(f"File deleted by user {current_user.id}: {file_id}")
+        logger.info(f"File deleted by admin {current_admin.id}: {file_id}")
 
     except FileNotFoundError:
         raise HTTPException(
@@ -319,7 +298,7 @@ async def update_file_status(
     file_id: UUID,
     request: FileStatusUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_admin: User = Depends(get_current_admin),
 ):
     """
     Update the processing status of a file.
@@ -329,23 +308,15 @@ async def update_file_status(
     - **file_id**: UUID of the file
     - **request**: New status (uploaded, processing, processed, failed)
 
-    **Requires authentication and file ownership.**
+    **Requires ADMIN role only.**
     """
     try:
         file_service = FileService(db=db)
 
-        # Verify ownership
-        document = file_service.get_file(str(file_id))
-        if document.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to update this file"
-            )
-
-        # Update status
+        # Update status (admin can update any file)
         updated_document = file_service.update_file_status(str(file_id), request.status)
 
-        logger.info(f"File status updated by user {current_user.id}: {file_id} -> {request.status}")
+        logger.info(f"File status updated by admin {current_admin.id}: {file_id} -> {request.status}")
 
         return FileDetailResponse.model_validate(updated_document)
 

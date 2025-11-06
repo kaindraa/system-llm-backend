@@ -410,6 +410,33 @@ class FileService:
 
         return documents, total
 
+    def list_all_files(
+        self,
+        skip: int = 0,
+        limit: int = 10,
+        status: DocumentStatus = None
+    ) -> tuple[list[Document], int]:
+        """
+        List ALL files from database with pagination (no user filter).
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            status: Optional filter by document status
+
+        Returns:
+            Tuple of (documents list, total count)
+        """
+        query = self.db.query(Document)
+
+        if status:
+            query = query.filter(Document.status == status)
+
+        total = query.count()
+        documents = query.order_by(Document.uploaded_at.desc()).offset(skip).limit(limit).all()
+
+        return documents, total
+
     def delete_file(self, file_id: str, user_id: str = None) -> bool:
         """
         Delete a file (both from storage and database).

@@ -574,9 +574,14 @@ Response 201:
 }
 ```
 
-#### List User's Files
+#### List All Files (System-wide)
 ```http
 GET /files?skip=0&limit=10&status=PROCESSED
+
+Query Parameters:
+- **skip**: Number of records to skip (for pagination)
+- **limit**: Maximum number of records to return (1-100)
+- **status**: Optional filter by document status (uploaded, processing, processed, failed)
 
 Response 200:
 {
@@ -589,9 +594,16 @@ Response 200:
       "status": "PROCESSED",
       "uploaded_at": "2025-11-06T10:30:00"
     }
-  ]
+  ],
+  "page": 1,
+  "page_size": 10
 }
 ```
+
+**Notes:**
+- Returns ALL files in the system (not just user's own files)
+- All authenticated users can see all files
+- Ordered by upload date (newest first)
 
 #### Get File Details
 ```http
@@ -609,6 +621,8 @@ Response 200:
 }
 ```
 
+**Authorization:** All authenticated users can access any file's details.
+
 #### Download File
 ```http
 GET /files/{file_id}/download
@@ -617,17 +631,23 @@ Response 200: (application/pdf)
 <binary PDF content>
 ```
 
-#### Delete File
+**Authorization:** All authenticated users can download any file.
+
+#### Delete File (Admin Only)
 ```http
 DELETE /files/{file_id}
+Authorization: Bearer {token}  // ADMIN required
 
 Response 204: No Content
 // Also deletes associated document_chunks
 ```
 
-#### Update File Status
+**Authorization:** Requires ADMIN role. Non-admin users will get 403 Forbidden.
+
+#### Update File Status (Admin Only)
 ```http
 PATCH /files/{file_id}/status
+Authorization: Bearer {token}  // ADMIN required
 Content-Type: application/json
 
 {
@@ -636,6 +656,8 @@ Content-Type: application/json
 
 Response 200: Updated file
 ```
+
+**Authorization:** Requires ADMIN role. Non-admin users will get 403 Forbidden.
 
 ---
 
