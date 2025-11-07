@@ -20,7 +20,7 @@ class DocumentChunk(Base):
     chunk_index = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
     page_number = Column(Integer)
-    embedding = Column(Vector(768))  # Dimension can be changed based on embedding model
+    embedding = Column(Vector(1536))  # Updated to 1536 dimensions for text-embedding-3-small
     chunk_metadata = Column(JSONB)  # Additional metadata (e.g., headings, context)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
