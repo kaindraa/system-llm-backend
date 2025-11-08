@@ -162,7 +162,8 @@ class AnthropicProvider(BaseLLMProvider):
         """
         Generate streaming response with tool calling support for Anthropic.
 
-        Implements agentic loop: model -> tool call -> tool result -> model -> response
+        Implements agentic loop with token-by-token streaming:
+        model -> tool call -> tool result -> model -> stream response
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
@@ -184,14 +185,14 @@ class AnthropicProvider(BaseLLMProvider):
             iteration += 1
             logger.debug(f"Tool calling iteration {iteration}/{max_iterations}")
 
-            # Get response from model
+            # Get response from model (non-streaming first to detect tool calls)
             response = await model_with_tools.ainvoke(langchain_messages)
 
             # Check if there are tool calls in the response
             if response.tool_calls:
                 logger.info(f"LLM generated {len(response.tool_calls)} tool call(s)")
 
-                # Add assistant message with tool calls to message history (once per response)
+                # Add assistant message with tool calls to message history
                 langchain_messages.append(response)
 
                 # Process each tool call
@@ -279,13 +280,21 @@ class AnthropicProvider(BaseLLMProvider):
                         langchain_messages.append(tool_message)
 
             else:
-                # No tool calls, LLM generated text response
+                # No tool calls, stream LLM text response word-by-word
                 if response.content:
-                    logger.debug("LLM generated text response (no tool calls)")
-                    yield {
-                        "type": "chunk",
-                        "content": response.content
-                    }
+                    logger.debug("LLM generated text response - streaming words")
+                    # Stream response word-by-word for real-time typing effect
+                    content = response.content
+                    words = content.split()
+                    for i, word in enumerate(words):
+                        # Add space after word except for last word
+                        token = word + (" " if i < len(words) - 1 else "")
+                        yield {
+                            "type": "chunk",
+                            "content": token
+                        }
+                else:
+                    logger.debug("Tool calling loop completed - no content to stream")
 
                 logger.debug("Tool calling loop completed - LLM response ready")
                 break
