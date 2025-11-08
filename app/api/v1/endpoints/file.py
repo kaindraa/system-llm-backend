@@ -205,7 +205,8 @@ async def download_file(
 
     - **file_id**: UUID of the file
 
-    Returns the PDF file as binary response for download.
+    Returns the PDF file as binary response for download using chunked streaming.
+    This method streams the file in chunks, avoiding memory issues with large files.
 
     **Requires authentication. All users can download any file.**
     """
@@ -214,17 +215,29 @@ async def download_file(
         document = file_service.get_file(str(file_id))
 
         # Allow all authenticated users to download files
-        # Get file content
-        content = file_service.get_file_content(str(file_id))
+        logger.info(f"File download started by user {current_user.id}: {file_id} ({document.original_filename})")
 
-        logger.info(f"File downloaded by user {current_user.id}: {file_id}")
+        # Stream file content in chunks (memory efficient, especially for large files)
+        # This is critical for production Cloud Run environments with limited memory
+        def file_iterator():
+            """Generator function to stream file content in chunks"""
+            try:
+                for chunk in file_service.stream_file_content(str(file_id), chunk_size=1024 * 1024):  # 1MB chunks
+                    yield chunk
+                logger.info(f"File download completed by user {current_user.id}: {file_id}")
+            except Exception as e:
+                logger.error(f"Error streaming file chunks - user: {current_user.id}, file: {file_id}, error: {str(e)}", exc_info=True)
+                raise
 
-        # Return file as streaming response
+        # Return file as streaming response with proper headers
         return StreamingResponse(
-            iter([content]),
+            file_iterator(),
             media_type=document.mime_type or "application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename={document.original_filename}"
+                "Content-Disposition": f"attachment; filename={document.original_filename}",
+                "Content-Type": document.mime_type or "application/pdf",
+                "X-File-ID": str(file_id),
+                "X-File-Name": document.original_filename,
             }
         )
 
@@ -236,7 +249,7 @@ async def download_file(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error downloading file: {str(e)}", exc_info=True)
+        logger.error(f"Error downloading file - file_id: {file_id}, user: {current_user.id}, error: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to download file: {str(e)}"

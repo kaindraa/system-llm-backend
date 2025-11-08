@@ -79,6 +79,23 @@ class FileStorageProvider(ABC):
         """
         pass
 
+    @abstractmethod
+    def stream(self, file_id: str, chunk_size: int = 1024 * 1024):
+        """
+        Stream file content in chunks.
+
+        Args:
+            file_id: Unique identifier for the file
+            chunk_size: Size of each chunk to yield (default 1MB)
+
+        Yields:
+            Chunks of file content as bytes
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+        """
+        pass
+
 
 class LocalFileStorage(FileStorageProvider):
     """Local file system storage provider"""
@@ -157,6 +174,31 @@ class LocalFileStorage(FileStorageProvider):
         """Check if file exists in local storage"""
         return self._get_file_path(file_id).exists()
 
+    def stream(self, file_id: str, chunk_size: int = 1024 * 1024):
+        """Stream file from local storage in chunks"""
+        try:
+            file_path = self._get_file_path(file_id)
+
+            if not file_path.exists():
+                raise FileNotFoundError(f"File not found: {file_id}")
+
+            logger.info(f"[LocalFileStorage.stream] Streaming file: {file_id}, chunk_size: {chunk_size} bytes")
+
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+
+            logger.info(f"[LocalFileStorage.stream] Streaming completed: {file_id}")
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"[LocalFileStorage.stream] Error streaming file {file_id}: {str(e)}")
+            raise
+
 
 class GCSStorageProvider(FileStorageProvider):
     """Google Cloud Storage provider"""
@@ -176,6 +218,7 @@ class GCSStorageProvider(FileStorageProvider):
 
         self.bucket_name = bucket_name
         self.project_id = project_id
+        self.chunk_size = 1024 * 1024  # 1MB chunks for streaming
 
         try:
             # Initialize GCS client
@@ -298,6 +341,62 @@ class GCSStorageProvider(FileStorageProvider):
             logger.error(f"Error checking file existence in GCS {file_id}: {str(e)}")
             return False
 
+    def stream(self, file_id: str, chunk_size: int = 1024 * 1024):
+        """
+        Stream file from GCS in chunks (memory efficient).
+
+        This is critical for production Cloud Run environments where memory is limited.
+        Instead of loading the entire file into memory, this streams it in chunks.
+        """
+        try:
+            blob_name = self._get_blob_name(file_id)
+            logger.info(f"[GCSStorageProvider.stream] Starting stream - file_id: {file_id}, blob_name: {blob_name}, chunk_size: {chunk_size}")
+
+            blob = self.bucket.blob(blob_name)
+            exists = blob.exists()
+            logger.info(f"[GCSStorageProvider.stream] Blob exists check: {exists}")
+
+            if not exists:
+                logger.error(f"[GCSStorageProvider.stream] File not found in GCS - file_id: {file_id}, blob_path: gs://{self.bucket_name}/{blob_name}")
+                raise FileNotFoundError(f"File not found in GCS: {file_id} (path: gs://{self.bucket_name}/{blob_name})")
+
+            # Stream file content in chunks using range requests
+            # This prevents loading entire file into memory
+            logger.info(f"[GCSStorageProvider.stream] Beginning chunked download from GCS")
+
+            offset = 0
+
+            while True:
+                try:
+                    # Download in chunks using range requests (more efficient for large files)
+                    end_byte = offset + chunk_size - 1
+                    chunk_data = blob.download_as_bytes(start=offset, end=end_byte)
+
+                    if not chunk_data:
+                        logger.info(f"[GCSStorageProvider.stream] Stream completed - total bytes downloaded: {offset}")
+                        break
+
+                    logger.debug(f"[GCSStorageProvider.stream] Downloaded chunk: offset={offset}, chunk_size={len(chunk_data)}")
+                    yield chunk_data
+                    offset += len(chunk_data)
+
+                    # If we got less than requested, this is the final chunk
+                    if len(chunk_data) < chunk_size:
+                        logger.info(f"[GCSStorageProvider.stream] Final chunk received - total bytes: {offset}")
+                        break
+
+                except Exception as chunk_error:
+                    logger.error(f"[GCSStorageProvider.stream] Error downloading chunk at offset {offset}: {str(chunk_error)}", exc_info=True)
+                    raise
+
+            logger.info(f"[GCSStorageProvider.stream] Successfully streamed file - file_id: {file_id}, total_size: {offset} bytes")
+
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"[GCSStorageProvider.stream] Error streaming file - file_id: {file_id}, error: {str(e)}", exc_info=True)
+            raise
+
 
 # Global instance - will be initialized in main.py based on config
 storage_provider: FileStorageProvider = None
@@ -407,6 +506,33 @@ class FileService:
             return content
         except Exception as e:
             self.logger.error(f"[FileService.get_file_content] Failed to retrieve file - file_id: {file_id}, error: {str(e)}", exc_info=True)
+            raise
+
+    def stream_file_content(self, file_id: str, chunk_size: int = 1024 * 1024):
+        """
+        Stream file content by document ID in chunks (memory efficient).
+
+        This is the recommended method for downloads, especially for large files.
+        It streams the file in chunks instead of loading everything into memory.
+
+        Args:
+            file_id: UUID of the document
+            chunk_size: Size of each chunk to stream (default 1MB)
+
+        Yields:
+            Chunks of file content as bytes
+        """
+        self.logger.info(f"[FileService.stream_file_content] Starting - file_id: {file_id}, chunk_size: {chunk_size}")
+        document = self.get_file(file_id)
+        self.logger.info(f"[FileService.stream_file_content] Document found - filename: {document.filename}, storage: {self.storage.__class__.__name__}")
+
+        try:
+            # Stream from storage provider
+            for chunk in self.storage.stream(document.filename, chunk_size=chunk_size):
+                yield chunk
+            self.logger.info(f"[FileService.stream_file_content] Successfully streamed file - file_id: {file_id}")
+        except Exception as e:
+            self.logger.error(f"[FileService.stream_file_content] Failed to stream file - file_id: {file_id}, error: {str(e)}", exc_info=True)
             raise
 
     def list_files(
