@@ -346,7 +346,11 @@ class GCSStorageProvider(FileStorageProvider):
         Stream file from GCS in chunks (memory efficient).
 
         This is critical for production Cloud Run environments where memory is limited.
-        Instead of loading the entire file into memory, this streams it in chunks.
+        Instead of loading the entire file into memory, this streams it in chunks using
+        Google Cloud Storage's native download_as_bytes with range requests.
+
+        **Important**: For large files or unreliable connections, use get() instead
+        and implement client-side resumable downloads.
         """
         try:
             blob_name = self._get_blob_name(file_id)
@@ -360,36 +364,73 @@ class GCSStorageProvider(FileStorageProvider):
                 logger.error(f"[GCSStorageProvider.stream] File not found in GCS - file_id: {file_id}, blob_path: gs://{self.bucket_name}/{blob_name}")
                 raise FileNotFoundError(f"File not found in GCS: {file_id} (path: gs://{self.bucket_name}/{blob_name})")
 
+            # Get blob metadata to know total size for validation
+            blob.reload()  # Ensure metadata is fresh
+            total_size = blob.size
+            logger.info(f"[GCSStorageProvider.stream] Blob total size from metadata: {total_size} bytes")
+
+            if total_size == 0:
+                logger.warning(f"[GCSStorageProvider.stream] Blob size is 0 bytes - file might be corrupt")
+                # Yield empty iterator or raise error?
+                # For now, yield nothing (empty file)
+                return
+
             # Stream file content in chunks using range requests
-            # This prevents loading entire file into memory
-            logger.info(f"[GCSStorageProvider.stream] Beginning chunked download from GCS")
+            logger.info(f"[GCSStorageProvider.stream] Beginning chunked download from GCS - total_size: {total_size}")
 
             offset = 0
+            chunks_count = 0
 
-            while True:
+            while offset < total_size:
                 try:
-                    # Download in chunks using range requests (more efficient for large files)
-                    end_byte = offset + chunk_size - 1
+                    # Download in chunks using range requests
+                    # Note: end_byte is INCLUSIVE in HTTP range requests
+                    end_byte = min(offset + chunk_size - 1, total_size - 1)
+
+                    logger.debug(f"[GCSStorageProvider.stream] Requesting chunk - offset: {offset}, end_byte: {end_byte}, expected_size: {end_byte - offset + 1}")
+
                     chunk_data = blob.download_as_bytes(start=offset, end=end_byte)
+                    chunks_count += 1
 
                     if not chunk_data:
-                        logger.info(f"[GCSStorageProvider.stream] Stream completed - total bytes downloaded: {offset}")
+                        logger.warning(f"[GCSStorageProvider.stream] Empty chunk received at offset {offset} (might indicate corruption)")
                         break
 
-                    logger.debug(f"[GCSStorageProvider.stream] Downloaded chunk: offset={offset}, chunk_size={len(chunk_data)}")
+                    actual_chunk_size = len(chunk_data)
+                    logger.debug(f"[GCSStorageProvider.stream] Downloaded chunk #{chunks_count} - offset: {offset}, size: {actual_chunk_size}")
+
+                    # Validate chunk size
+                    expected_size = end_byte - offset + 1
+                    if actual_chunk_size != expected_size:
+                        logger.warning(
+                            f"[GCSStorageProvider.stream] Chunk size mismatch - "
+                            f"expected: {expected_size}, got: {actual_chunk_size} - "
+                            f"This might indicate file corruption!"
+                        )
+
                     yield chunk_data
-                    offset += len(chunk_data)
-
-                    # If we got less than requested, this is the final chunk
-                    if len(chunk_data) < chunk_size:
-                        logger.info(f"[GCSStorageProvider.stream] Final chunk received - total bytes: {offset}")
-                        break
+                    offset += actual_chunk_size
 
                 except Exception as chunk_error:
-                    logger.error(f"[GCSStorageProvider.stream] Error downloading chunk at offset {offset}: {str(chunk_error)}", exc_info=True)
+                    logger.error(
+                        f"[GCSStorageProvider.stream] Error downloading chunk #{chunks_count} at offset {offset}: {str(chunk_error)}",
+                        exc_info=True
+                    )
                     raise
 
-            logger.info(f"[GCSStorageProvider.stream] Successfully streamed file - file_id: {file_id}, total_size: {offset} bytes")
+            # Validate total bytes downloaded matches expected size
+            if offset != total_size:
+                logger.error(
+                    f"[GCSStorageProvider.stream] Size mismatch after stream - "
+                    f"expected: {total_size}, downloaded: {offset} - "
+                    f"FILE MIGHT BE CORRUPT!"
+                )
+                # Don't raise - already streamed, but log for debugging
+            else:
+                logger.info(
+                    f"[GCSStorageProvider.stream] Successfully streamed file - "
+                    f"file_id: {file_id}, chunks: {chunks_count}, total_size: {offset} bytes"
+                )
 
         except FileNotFoundError:
             raise
