@@ -14,6 +14,7 @@ from app.models.chat_session import ChatSession, SessionStatus
 from app.models.model import Model
 from app.models.prompt import Prompt
 from app.services.llm import LLMService
+from app.services.rag import RAGService, create_rag_tools
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -256,21 +257,26 @@ class ChatService:
         session_id: UUID,
         user_id: UUID,
         message_content: str,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        use_rag: bool = True
     ):
         """
         Send a message in a chat session and stream LLM response.
-        Yields chunks of the assistant's response as they are generated.
+
+        Can optionally use RAG tool calling: LLM can call semantic_search to find
+        relevant documents, then generates response with document context.
 
         Args:
             session_id: Chat session ID
             user_id: User ID
             message_content: User's message content
             api_key: Optional API key for LLM provider
+            use_rag: Enable RAG tool calling (default: True)
 
         Yields:
             Dict with 'type' and 'content':
             - {'type': 'user_message', 'content': {...}}
+            - {'type': 'rag_search', 'content': {...}} (only if use_rag=True)
             - {'type': 'chunk', 'content': 'text chunk'}
             - {'type': 'done', 'content': {...}}
 
@@ -302,29 +308,104 @@ class ChatService:
             "content": message_content
         })
 
-        logger.info(f"Session {session_id}: Streaming message to LLM (context: {len(conversation_context)} msgs)")
+        logger.info(
+            f"Session {session_id}: Streaming message (rag={use_rag}, context: {len(conversation_context)} msgs)"
+        )
 
-        # Stream LLM response
+        # Initialize variables
         full_content = ""
+        sources_list = []
+
         try:
-            async for chunk in self.llm_service.generate_stream(
-                model_id=str(session.model_id),
-                messages=conversation_context,
-                api_key=api_key
-            ):
-                full_content += chunk
-                yield {"type": "chunk", "content": chunk}
+            if use_rag:
+                # --- RAG Mode: Tool Calling ---
+                # Create RAG tools
+                rag_tools = create_rag_tools(self.db)
+
+                # Get LLM provider for tool calling
+                provider = self.llm_service.get_provider(str(session.model_id), api_key=api_key)
+
+                # Use tool calling with RAG
+                async for event in provider.agenerate_stream_with_tools(
+                    messages=conversation_context,
+                    tools=rag_tools
+                ):
+                    event_type = event.get("type")
+                    event_content = event.get("content")
+
+                    if event_type == "tool_call":
+                        # LLM is calling a tool
+                        tool_name = event_content.get("tool_name")
+                        logger.debug(f"Tool called: {tool_name}")
+                        yield {
+                            "type": "rag_search",
+                            "content": {
+                                "query": event_content.get("tool_input", {}).get("query", ""),
+                                "status": "searching"
+                            }
+                        }
+
+                    elif event_type == "tool_result":
+                        # Tool executed and returned result
+                        tool_name = event_content.get("tool_name")
+                        result = event_content.get("result")
+                        error = event_content.get("error")
+
+                        if error:
+                            logger.warning(f"Tool {tool_name} error: {error}")
+                        else:
+                            logger.debug(f"Tool {tool_name} returned {result.get('count', 0)} results")
+
+                            # Extract sources from tool result
+                            if isinstance(result, dict):
+                                tool_sources = result.get("sources", [])
+                                sources_list.extend(tool_sources)
+
+                                yield {
+                                    "type": "rag_search",
+                                    "content": {
+                                        "query": result.get("query", ""),
+                                        "results_count": result.get("count", 0),
+                                        "status": "completed"
+                                    }
+                                }
+
+                    elif event_type == "chunk":
+                        # Streaming text response from LLM
+                        chunk_content = event_content
+                        full_content += chunk_content
+                        yield {"type": "chunk", "content": chunk_content}
+
+            else:
+                # --- Regular Mode: No RAG ---
+                async for chunk in self.llm_service.generate_stream(
+                    model_id=str(session.model_id),
+                    messages=conversation_context,
+                    api_key=api_key
+                ):
+                    full_content += chunk
+                    yield {"type": "chunk", "content": chunk}
 
         except Exception as e:
             logger.error(f"LLM error in session {session_id}: {str(e)}")
             raise
 
-        # Create assistant message with full content
+        # Remove duplicate sources (by document_id and page)
+        unique_sources = []
+        if use_rag and sources_list:
+            seen = set()
+            for source in sources_list:
+                key = (source.get("document_id"), source.get("page"))
+                if key not in seen:
+                    unique_sources.append(source)
+                    seen.add(key)
+
+        # Create assistant message with full content and sources
         assistant_message = {
             "role": "assistant",
             "content": full_content,
             "created_at": datetime.utcnow().isoformat(),
-            "sources": None
+            "sources": unique_sources if unique_sources else None
         }
 
         # Save messages to database
@@ -338,7 +419,10 @@ class ChatService:
         self.db.commit()
         self.db.refresh(session)
 
-        logger.info(f"Session {session_id}: Streaming completed (total: {len(session.messages)})")
+        logger.info(
+            f"Session {session_id}: Streaming completed (total: {len(session.messages)}, "
+            f"sources: {len(unique_sources)})"
+        )
 
         # Yield done signal with assistant message
         yield {"type": "done", "content": assistant_message}

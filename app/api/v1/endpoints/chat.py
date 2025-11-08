@@ -327,16 +327,22 @@ async def send_message(
                 session_id=session_id,
                 user_id=current_user.id,
                 message_content=request.message,
-                api_key=api_key
+                api_key=api_key,
+                use_rag=True  # Enable RAG by default - LLM decides if it needs to search
             ):
                 event_type = event["type"]
                 content = event["content"]
 
                 if event_type == "user_message":
                     yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
+                elif event_type == "rag_search":
+                    # RAG tool call event
+                    yield f"event: rag_search\ndata: {json.dumps(content)}\n\n"
                 elif event_type == "chunk":
+                    # Text chunk from LLM response
                     yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"
                 elif event_type == "done":
+                    # Final response with sources
                     yield f"event: done\ndata: {json.dumps(content)}\n\n"
 
         except ValueError as e:

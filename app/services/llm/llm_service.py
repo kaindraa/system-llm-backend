@@ -1,5 +1,6 @@
-from typing import Dict, Any, Optional, Type
+from typing import Dict, Any, Optional, Type, List
 from sqlalchemy.orm import Session
+from langchain_core.tools import Tool
 from app.services.llm.base import BaseLLMProvider
 from app.services.llm.openai_provider import OpenAIProvider
 from app.services.llm.anthropic_provider import AnthropicProvider
@@ -241,3 +242,34 @@ class LLMService:
         """Clear the provider cache."""
         self._providers.clear()
         logger.info("LLM provider cache cleared")
+
+    async def stream_response_with_tools(
+        self,
+        model_id: str,
+        messages: list[Dict[str, str]],
+        tools: List[Tool],
+        api_key: Optional[str] = None,
+        max_iterations: int = 10
+    ):
+        """
+        Stream response using specified model with tool calling support.
+
+        Allows the LLM to call tools (like semantic search) to augment its response.
+
+        Args:
+            model_id: Model ID or name
+            messages: List of message dictionaries
+            tools: List of Langchain Tool objects
+            api_key: API key for provider
+            max_iterations: Maximum tool calling iterations
+
+        Yields:
+            Dict with event data from tool calling loop
+        """
+        provider = self.get_provider(model_id, api_key=api_key)
+        async for event in provider.agenerate_stream_with_tools(
+            messages=messages,
+            tools=tools,
+            max_iterations=max_iterations
+        ):
+            yield event

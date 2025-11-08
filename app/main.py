@@ -5,7 +5,7 @@ from sqladmin import Admin
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
 from app.core.database import engine
-from app.api.v1.endpoints import auth, chat, prompt, user, file
+from app.api.v1.endpoints import auth, chat, prompt, user, file, rag
 from app.middleware import RequestLoggingMiddleware, ErrorLoggingMiddleware
 from app.admin.auth import AdminAuthBackend
 from app.admin import (
@@ -60,6 +60,7 @@ app.include_router(chat.router, prefix=settings.API_V1_PREFIX)
 app.include_router(prompt.router, prefix=settings.API_V1_PREFIX)
 app.include_router(user.router, prefix=settings.API_V1_PREFIX)
 app.include_router(file.router, prefix=settings.API_V1_PREFIX)
+app.include_router(rag.router, prefix=settings.API_V1_PREFIX)
 
 # Root endpoint
 @app.get("/")

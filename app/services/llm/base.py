@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
+from langchain_core.tools import Tool
 
 
 class BaseLLMProvider(ABC):
@@ -54,6 +55,32 @@ class BaseLLMProvider(ABC):
             Provider name (e.g., 'openai', 'ollama', 'anthropic')
         """
         pass
+
+    async def agenerate_stream_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Tool],
+        max_iterations: int = 10
+    ):
+        """
+        Generate streaming response with tool calling support.
+
+        Yields chunks of the final response after executing any tool calls.
+
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+            tools: List of Langchain Tool objects available for the LLM to call
+            max_iterations: Maximum number of tool call iterations (to prevent infinite loops)
+
+        Yields:
+            Dict with response data:
+            - 'type': 'chunk' for text chunks, 'tool_call' for tool calls, 'tool_result' for tool results
+            - 'content': The actual content
+        """
+        raise NotImplementedError(
+            f"Tool calling not yet implemented for {self.get_provider_name()} provider. "
+            "Override this method in the provider implementation."
+        )
 
     def get_model_info(self) -> Dict[str, Any]:
         """

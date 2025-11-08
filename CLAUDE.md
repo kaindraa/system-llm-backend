@@ -2,8 +2,8 @@
 
 > **Dokumentasi ini berfungsi sebagai konteks lengkap untuk LLM sessions berikutnya. Berisi arsitektur, database, API, struktur file, dan penjelasan detail setiap komponen.**
 
-**Last Updated:** 2025-11-06
-**Project Status:** Production Ready (Stages 1-8 Completed)
+**Last Updated:** 2025-11-08
+**Project Status:** Production Ready (Stages 1-9 Completed) - ✨ RAG with Tool Calling
 
 ---
 
@@ -14,11 +14,12 @@ Sistem LLM Backend adalah aplikasi FastAPI yang mengintegrasikan multiple LLM pr
 - ✅ Chat interaktif dengan 3+ LLM models
 - ✅ Upload dan processing PDF untuk RAG
 - ✅ Vector embeddings dengan pgvector untuk semantic search
+- ✅ **LLM Tool Calling** - LLM intelligent decides when to search documents
 - ✅ Manajemen sistem prompts dinamis
-- ✅ Session management dengan JSONB messages
+- ✅ Session management dengan JSONB messages + sources
 - ✅ Role-based access control (Admin/Student)
 - ✅ Admin panel untuk database management
-- ✅ Streaming responses dengan Server-Sent Events (SSE)
+- ✅ Streaming responses dengan Server-Sent Events (SSE) + RAG events
 
 ---
 
@@ -106,14 +107,18 @@ system-llm-backend/
 │   ├── services/                    # Business logic layer
 │   │   ├── auth.py                 # Authentication service
 │   │   ├── chat/
-│   │   │   └── chat_service.py      # Chat session + message management
+│   │   │   └── chat_service.py      # Chat session + message management with RAG
 │   │   ├── file_service.py          # Pluggable file storage (local/GCS)
 │   │   ├── prompt_service.py        # Prompt CRUD + active state management
+│   │   ├── rag/
+│   │   │   ├── rag_service.py      # Semantic search + embeddings
+│   │   │   ├── tools.py            # Langchain RAG tool definitions
+│   │   │   └── __init__.py
 │   │   └── llm/
 │   │       ├── base.py             # Abstract BaseLLMProvider class
 │   │       ├── llm_service.py       # LLM provider factory + registry
-│   │       ├── openai_provider.py
-│   │       ├── anthropic_provider.py
+│   │       ├── openai_provider.py   # OpenAI with tool calling support
+│   │       ├── anthropic_provider.py # Anthropic with tool calling support
 │   │       └── google_provider.py
 │   ├── middleware/
 │   │   └── logging.py              # Request/response logging middleware
@@ -507,7 +512,7 @@ Response 200:
 }
 ```
 
-#### Send Message (Streaming SSE Response)
+#### Send Message (Streaming SSE Response with RAG)
 ```http
 POST /chat/sessions/{session_id}/messages
 Authorization: Bearer {token}
@@ -518,15 +523,44 @@ Content-Type: application/json
 }
 
 Response: 200 (text/event-stream)
-data: {"type": "start", "timestamp": "..."}
-data: {"type": "content_block_start"}
-data: {"type": "content_block_delta", "delta": {"text": "While"}}
-data: {"type": "content_block_delta", "delta": {"text": " loop"}}
-...
-data: {"type": "message_stop"}
 
-// Server sends chunks as LLM generates tokens
-// Client streams response in real-time
+// User message
+event: user_message
+data: {"role": "user", "content": "Apa bedanya...", "created_at": "..."}
+
+// Optional: RAG tool call (if LLM decides to search)
+event: rag_search
+data: {"query": "while for loop perbedaan", "status": "searching"}
+
+// RAG results returned
+event: rag_search
+data: {"query": "while for loop perbedaan", "results_count": 3, "status": "completed"}
+
+// Response chunks as LLM generates
+event: chunk
+data: {"content": "While"}
+
+event: chunk
+data: {"content": " loop"}
+
+// Final response with sources
+event: done
+data: {
+  "role": "assistant",
+  "content": "While loop...",
+  "sources": [
+    {
+      "document_id": "uuid",
+      "filename": "python-loops.pdf",
+      "page": 5,
+      "similarity_score": 0.92
+    }
+  ]
+}
+
+**Note:** RAG is automatic - LLM decides whether to call semantic_search tool.
+If documents are relevant to query, LLM will search them. Sources are included
+in final response if RAG was used.
 ```
 
 #### Update Chat Session (Admin Only)
@@ -772,6 +806,101 @@ Response 200:
 
 ---
 
+### 🔍 RAG (Retrieval-Augmented Generation) (`/rag`)
+
+#### RAG Health Check
+```http
+GET /rag/health
+
+Response 200:
+{
+  "status": "healthy",
+  "embeddings": {
+    "available": true,
+    "model": "text-embedding-3-small (1536 dimensions)"
+  },
+  "pgvector": {
+    "available": true,
+    "total_chunks": 42,
+    "total_documents": 3,
+    "processed_documents": 3
+  },
+  "errors": []
+}
+```
+
+#### RAG Configuration
+```http
+GET /rag/config
+
+Response 200:
+{
+  "embeddings": {
+    "provider": "OpenAI",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "available": true
+  },
+  "vector_database": {
+    "system": "PostgreSQL with pgvector extension",
+    "similarity_metric": "Cosine similarity (1 - distance)",
+    "available": true
+  },
+  "documents": {
+    "total": 3,
+    "processed": 3,
+    "pending": 0,
+    "total_chunks": 42
+  },
+  "search_settings": {
+    "default_top_k": 5,
+    "min_similarity_threshold": 0.65,
+    "max_results": 20
+  }
+}
+```
+
+#### Semantic Search (Direct API)
+```http
+POST /rag/search
+Authorization: Bearer {token}
+Content-Type: application/json
+
+Query Parameters:
+- query (string, required): Search query
+- top_k (int, default 5): Number of results (max 20)
+- similarity_threshold (float, default 0.7): Minimum relevance score
+
+Example:
+POST /rag/search?query=apa%20itu%20NAT&top_k=5&similarity_threshold=0.7
+
+Response 200:
+{
+  "query": "apa itu NAT",
+  "results": [
+    {
+      "chunk_id": "uuid",
+      "content": "Network Address Translation (NAT) adalah...",
+      "document_id": "uuid",
+      "filename": "H03 - NAT & OSPF.pdf",
+      "page": 5,
+      "similarity_score": 0.92,
+      "chunk_index": 2,
+      "metadata": {"heading": "NAT Definition"}
+    },
+    ...
+  ],
+  "count": 5,
+  "top_k": 5,
+  "threshold": 0.7
+}
+```
+
+**Note:** In normal chat flow, RAG is called automatically via tool calling.
+This endpoint is primarily for testing/debugging purposes.
+
+---
+
 ## 🔧 CORE SERVICES
 
 ### Authentication Service (`app/services/auth.py`)
@@ -951,30 +1080,47 @@ class LLMService:
 
 ---
 
-### RAG Integration (Within Chat Service)
+### RAG Service (`app/services/rag/rag_service.py`)
 ```python
-async def get_rag_context(session_id: str, query: str, top_k: int = 5) -> List[DocumentChunk]
-    # 1. Get user's documents
-    # 2. Generate embedding for query
-    # 3. Perform pgvector semantic search (cosine similarity)
-    # 4. Return top-k relevant chunks with metadata
+class RAGService:
+    def generate_embedding(text: str) -> List[float]
+        # Generate 1536-dim embedding using OpenAI text-embedding-3-small
 
-def format_rag_context(chunks: List[DocumentChunk]) -> str
-    # Format chunks as context string for LLM prompt
+    def semantic_search(query: str, top_k: int = 5, threshold: float = 0.7) -> List[Dict]
+        # 1. Generate embedding for query
+        # 2. Perform pgvector cosine similarity search
+        # 3. Return top-k chunks with similarity scores (1 - distance)
 
-def extract_sources(chunks: List[DocumentChunk]) -> List[Dict]
-    # Extract source metadata for response
+    def format_rag_context(chunks: List[Dict]) -> str
+        # Format chunks as context string for LLM prompt
+
+    def extract_sources(chunks: List[Dict]) -> List[Dict]
+        # Extract unique sources (doc_id, page) from chunks
+
+    def health_check() -> Dict
+        # Check embeddings client + pgvector availability
 ```
 
-**RAG Pipeline:**
+### RAG Tool Calling (`app/services/rag/tools.py`)
+```python
+def semantic_search_tool():
+    # Langchain Tool that LLM can call during generation
+    # Takes: query (str), top_k (int)
+    # Returns: {"results": [...], "sources": [...], "count": int}
+```
+
+**RAG Pipeline with Tool Calling:**
 1. User sends message: "Apa itu loop?"
-2. System retrieves user's documents
-3. Query embedded using same embedding model as documents
-4. pgvector performs nearest neighbor search
-5. Top-5 relevant chunks returned
-6. Chunks formatted into system context
-7. LLM receives augmented prompt with context
-8. Response includes source references
+2. LLM receives message + system prompt + RAG tool definition
+3. LLM decides: "Do I need documents to answer this?"
+4. If YES → LLM calls `semantic_search` tool with query
+5. Tool returns relevant chunks + sources
+6. LLM sees search results and generates response
+7. Final response includes sources from search results
+8. If NO → LLM responds without searching (no sources)
+
+**Key Advantage:** LLM intelligently decides when RAG is needed.
+Unlike traditional RAG, document context only when relevant.
 
 ---
 
@@ -1308,42 +1454,62 @@ async def send_message(id: str, request: ChatRequest):
 
 ## 🔍 IMPORTANT IMPLEMENTATION DETAILS
 
-### Chat Session Message Flow
+### Chat Session Message Flow with RAG Tool Calling
 ```
 1. User sends: POST /chat/sessions/{id}/messages
-2. System extracts user message
-3. Retrieves chat session + all previous messages
-4. Fetches system prompt from database
-5. If user has documents:
-   - Generate embedding for user query
-   - Search pgvector for relevant chunks
-   - Append RAG context to system prompt
-6. Construct LLM prompt:
-   - System prompt (with RAG context if applicable)
-   - Previous messages (chat history)
-   - Current user message
-7. Call LLM with streaming:
-   - For each token from LLM:
-     - Send as SSE chunk to client
-     - Accumulate in buffer
-   - On stream complete:
-     - Add full response to messages JSONB array
-     - Save to database
-     - Extract and store source references
-8. Return completed response with sources
+
+2. System extracts user message + builds context:
+   - Retrieves chat session
+   - Gets system prompt from database
+   - Builds message history from previous messages
+
+3. Create RAG tools (LLM-callable functions):
+   - semantic_search(query: str, top_k: int) → {"results": [...], "sources": [...]}
+
+4. Bind tools to LLM + start agentic loop:
+
+   5a. LLM receives:
+       - System prompt
+       - Chat history
+       - Current user message
+       - Available tools (semantic_search)
+
+   5b. LLM decides: "Do I need documents to answer?"
+       - If NO → Return response directly (no sources)
+       - If YES → Call semantic_search tool with query
+
+   5c. If tool called:
+       - Generate embedding for query
+       - Search pgvector for relevant chunks
+       - Return results to LLM
+       - LLM sees search results + generates response
+
+6. Stream response to client as SSE:
+   - event: user_message (user input)
+   - event: rag_search (optional, if tool called)
+   - event: chunk (response text chunks)
+   - event: done (final response with sources)
+
+7. Save to database:
+   - User message
+   - Assistant message with full content
+   - Sources (from RAG search if applicable)
 ```
 
-### Vector Search Flow
+### Vector Search Implementation
 ```
-1. Query from user: "Apa itu loop?"
-2. Generate embedding: embed.encode("Apa itu loop?") → vector(768)
-3. PostgreSQL pgvector query:
-   SELECT * FROM document_chunk
-   WHERE document_id IN (user's documents)
-   ORDER BY embedding <-> query_embedding
+1. Query: "Apa itu loop?"
+2. Generate embedding: OpenAI text-embedding-3-small(query) → 1536-dim vector
+3. PostgreSQL pgvector query (cosine similarity):
+   SELECT *
+   FROM document_chunk dc
+   JOIN document d ON dc.document_id = d.id
+   WHERE d.status = 'PROCESSED'
+   ORDER BY dc.embedding <=> query_vector DESC
    LIMIT 5
-4. Return top-5 most similar chunks
-5. Format as context for LLM
+4. Calculate similarity: 1 - distance (range 0-1)
+5. Filter by threshold (default 0.7)
+6. Return top-k chunks with similarity scores
 ```
 
 ### File Processing Flow
@@ -1426,12 +1592,17 @@ SELECT * FROM document_chunk WHERE document_id = 'uuid' LIMIT 5;
 - **Stage 5: Chat MVP** - Core chat with streaming and context
 - **Stage 6: Prompt Management** - Dynamic system prompts
 - **Stage 7: File Management** - PDF upload and storage
-- **Stage 8: RAG Pipeline** - Vector embeddings and semantic search
+- **Stage 8: RAG Pipeline** - Vector embeddings with pgvector
+- **Stage 9: Tool Calling** - ✨ NEW! LLM tool calling with semantic search
+  - OpenAI & Anthropic providers support tool calling
+  - LLM intelligently decides when to search documents
+  - Automatic source attribution in responses
+  - SSE streaming with `rag_search` events
 
 ### 🔄 In Progress / TODO
-- **Stage 9: Analytics** - Session analysis and comprehension tracking
-- **Stage 10: Frontend UI** - React application
-- **Stage 11: Deployment** - Production deployment
+- **Stage 10: Analytics** - Session analysis and comprehension tracking
+- **Stage 11: Frontend UI** - React application with RAG event handling
+- **Stage 12: Deployment** - Production deployment
 
 ---
 
@@ -1508,19 +1679,51 @@ Check disk space
 
 ## 📝 NOTES FOR FUTURE WORK
 
-1. **Async File Processing**: Implement background task queue (Celery/RQ) for file processing
-2. **Caching**: Add Redis for LLM response caching and session caching
-3. **Rate Limiting**: Implement rate limiting per user/endpoint
-4. **Monitoring**: Add Sentry for error tracking and monitoring
-5. **Performance**: Index optimization for large document collections
-6. **Testing**: Comprehensive unit and integration tests
-7. **Documentation**: API documentation with examples
-8. **Frontend**: React application with all features
-9. **Deployment**: Kubernetes or Docker Swarm setup
-10. **Analytics Dashboard**: Grafana or similar for research insights
+1. **Async File Processing**: Implement background task queue (Celery/RQ) for:
+   - PDF text extraction
+   - Chunk generation
+   - Embedding calculation
+   - Note: Currently handled in notebook; move to production task queue
+
+2. **Caching**: Add Redis for:
+   - LLM response caching
+   - Session caching
+   - Embedding cache (same query = same embedding)
+
+3. **RAG Enhancements**:
+   - Implement Hybrid Search (semantic + keyword search)
+   - Add document summarization
+   - Implement citation/footnote generation
+   - Support multi-document reasoning
+
+4. **Rate Limiting**: Per-user/endpoint rate limiting
+
+5. **Monitoring & Observability**:
+   - Sentry for error tracking
+   - OpenTelemetry for distributed tracing
+   - RAG quality metrics dashboard
+
+6. **Performance**:
+   - pgvector index optimization (HNSW vs IVFFlat)
+   - Batch embedding generation
+   - Query optimization for large document collections
+
+7. **Testing**: Unit + integration tests for RAG pipeline
+
+8. **Frontend**:
+   - React application with SSE event handling
+   - Real-time RAG search visualization
+   - Source document viewer
+
+9. **Deployment**: Kubernetes setup with proper scaling
+
+10. **Analytics Dashboard**:
+    - RAG retrieval quality metrics
+    - Tool calling success rates
+    - Document relevance analytics
 
 ---
 
-**Last Updated:** November 6, 2025
+**Last Updated:** November 8, 2025
 **Maintained By:** System LLM Team
-**Version:** 2.0 (Production Ready)
+**Version:** 2.1 (RAG with Tool Calling)
