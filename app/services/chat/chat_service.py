@@ -211,18 +211,42 @@ class ChatService:
             "assistant_message": assistant_message
         }
 
-    def _build_conversation_context(self, session: ChatSession) -> List[Dict[str, str]]:
-        """Build conversation context from session messages."""
+    def _build_conversation_context(self, session: ChatSession, include_rag_instruction: bool = True) -> List[Dict[str, str]]:
+        """
+        Build conversation context from session messages.
+
+        Args:
+            session: Chat session
+            include_rag_instruction: Whether to add RAG instruction to system prompt
+        """
         context = []
 
+        # Get system prompt from database or use default
+        system_content = ""
         if session.prompt_id:
             prompt = self.db.query(Prompt).filter(Prompt.id == session.prompt_id).first()
             if prompt:
-                context.append({
-                    "role": "system",
-                    "content": prompt.content
-                })
+                system_content = prompt.content
 
+        # Add RAG instruction if enabled (for tool-aware models)
+        if include_rag_instruction:
+            rag_instruction = (
+                "\n\n"
+                "IMPORTANT: You have access to a semantic_search tool to find relevant documents. "
+                "When a user asks questions about content in uploaded documents, "
+                "ALWAYS use the semantic_search tool to find relevant information first. "
+                "Pass the user's question as the 'query' parameter to search the documents. "
+                "Then provide an answer based on the search results."
+            )
+            system_content = system_content + rag_instruction if system_content else rag_instruction
+
+        if system_content:
+            context.append({
+                "role": "system",
+                "content": system_content
+            })
+
+        # Add conversation history
         for msg in session.messages:
             context.append({
                 "role": msg["role"],
@@ -336,11 +360,20 @@ class ChatService:
                     if event_type == "tool_call":
                         # LLM is calling a tool
                         tool_name = event_content.get("tool_name")
-                        logger.debug(f"Tool called: {tool_name}")
+                        tool_input = event_content.get("tool_input", {})
+
+                        # Extract query from tool_input (handle different possible formats)
+                        if isinstance(tool_input, dict):
+                            query = tool_input.get("query", "")
+                        else:
+                            query = str(tool_input) if tool_input else ""
+
+                        logger.info(f"Tool '{tool_name}' called with input: {tool_input}")
+
                         yield {
                             "type": "rag_search",
                             "content": {
-                                "query": event_content.get("tool_input", {}).get("query", ""),
+                                "query": query,
                                 "status": "searching"
                             }
                         }

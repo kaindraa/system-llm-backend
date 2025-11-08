@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional
+import json
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import Tool
@@ -188,6 +189,11 @@ class AnthropicProvider(BaseLLMProvider):
 
             # Check if there are tool calls in the response
             if response.tool_calls:
+                logger.info(f"LLM generated {len(response.tool_calls)} tool call(s)")
+
+                # Add assistant message with tool calls to message history (once per response)
+                langchain_messages.append(response)
+
                 # Process each tool call
                 for tool_call in response.tool_calls:
                     tool_name = tool_call["name"]
@@ -213,6 +219,8 @@ class AnthropicProvider(BaseLLMProvider):
                             tool_to_run = tool
                             break
 
+                    tool_message = None
+
                     if tool_to_run:
                         try:
                             # Execute the tool
@@ -229,17 +237,19 @@ class AnthropicProvider(BaseLLMProvider):
                                 }
                             }
 
-                            # Add assistant message and tool result to message history
-                            langchain_messages.append(response)
-                            langchain_messages.append(
-                                ToolMessage(
-                                    content=str(tool_result),
-                                    tool_call_id=tool_id
-                                )
+                            # Format tool result for LLM (JSON for structured data)
+                            if isinstance(tool_result, dict):
+                                tool_result_str = json.dumps(tool_result, ensure_ascii=False, indent=2)
+                            else:
+                                tool_result_str = str(tool_result)
+
+                            tool_message = ToolMessage(
+                                content=tool_result_str,
+                                tool_call_id=tool_id
                             )
 
                         except Exception as e:
-                            logger.error(f"Tool execution failed: {e}")
+                            logger.error(f"Tool execution failed: {e}", exc_info=True)
                             yield {
                                 "type": "tool_result",
                                 "content": {
@@ -248,28 +258,30 @@ class AnthropicProvider(BaseLLMProvider):
                                     "error": str(e)
                                 }
                             }
-                            # Add error message
-                            langchain_messages.append(response)
-                            langchain_messages.append(
-                                ToolMessage(
-                                    content=f"Error: {str(e)}",
-                                    tool_call_id=tool_id,
-                                    is_error=True
-                                )
-                            )
-                    else:
-                        logger.error(f"Tool not found: {tool_name}")
-                        langchain_messages.append(response)
-                        langchain_messages.append(
-                            ToolMessage(
-                                content=f"Error: Tool '{tool_name}' not found",
+                            # Create error message
+                            tool_message = ToolMessage(
+                                content=f"Error executing tool: {str(e)}",
                                 tool_call_id=tool_id,
                                 is_error=True
                             )
+
+                    else:
+                        logger.error(f"Tool not found: {tool_name}")
+                        # Create error message for missing tool
+                        tool_message = ToolMessage(
+                            content=f"Error: Tool '{tool_name}' not found",
+                            tool_call_id=tool_id,
+                            is_error=True
                         )
+
+                    # Add tool message to message history
+                    if tool_message:
+                        langchain_messages.append(tool_message)
+
             else:
-                # No tool calls, return the text response
+                # No tool calls, LLM generated text response
                 if response.content:
+                    logger.debug("LLM generated text response (no tool calls)")
                     yield {
                         "type": "chunk",
                         "content": response.content
