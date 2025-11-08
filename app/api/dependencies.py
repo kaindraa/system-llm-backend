@@ -1,13 +1,19 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User, UserRole
+from app.services.llm import LLMService
 
 # HTTP Bearer scheme for JWT token
 security = HTTPBearer()
+
+
+def get_llm_service(request: Request) -> LLMService:
+    """Get singleton LLM service from app state."""
+    return request.app.state.llm_service
 
 
 async def get_current_user(

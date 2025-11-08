@@ -23,9 +23,10 @@ logger = get_logger(__name__)
 class ChatService:
     """Service for managing chat sessions and conversations."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, llm_service: Optional[LLMService] = None):
         self.db = db
-        self.llm_service = LLMService(db=db)
+        # Use provided singleton or create new instance for testing
+        self.llm_service = llm_service if llm_service else LLMService(db=db)
 
     def create_session(
         self,

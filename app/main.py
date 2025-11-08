@@ -18,6 +18,7 @@ from app.admin import (
     RAGConfigAdmin,
 )
 from app.services.file_service import initialize_storage_provider
+from app.services.llm import LLMService
 
 # Setup logging first
 setup_logging()
@@ -151,6 +152,16 @@ async def startup_event():
         logger.info(f"✅ Storage provider initialized: {settings.STORAGE_TYPE}")
     except Exception as e:
         logger.error(f"❌ Failed to initialize storage provider: {str(e)}")
+        raise
+
+    # Initialize LLM service singleton (reuse providers across requests)
+    try:
+        from app.core.database import SessionLocal
+        db = SessionLocal()
+        app.state.llm_service = LLMService(db=db)
+        logger.info(f"✅ LLM service singleton initialized (provider cache enabled)")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize LLM service: {str(e)}")
         raise
 
 # Shutdown event

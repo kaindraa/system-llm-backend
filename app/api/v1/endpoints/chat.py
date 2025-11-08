@@ -11,7 +11,7 @@ from typing import Optional
 from uuid import UUID
 import json
 
-from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student
+from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student, get_llm_service
 from app.models.user import User
 from app.models.chat_session import SessionStatus
 from app.models.model import Model
@@ -30,6 +30,7 @@ from app.schemas.chat import (
     PromptInfo,
 )
 from app.services.chat import ChatService
+from app.services.llm import LLMService
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -43,6 +44,7 @@ async def create_chat_session(
     request: ChatSessionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_student),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     Create a new chat session.
@@ -57,7 +59,7 @@ async def create_chat_session(
         logger.info(f"[CREATE_SESSION] Request received from user {current_user.id}")
         logger.info(f"[CREATE_SESSION] Request data: model_id={request.model_id}, title={request.title}, prompt_id={request.prompt_id}")
 
-        chat_service = ChatService(db=db)
+        chat_service = ChatService(db=db, llm_service=llm_service)
 
         session = chat_service.create_session(
             user_id=current_user.id,
@@ -92,6 +94,7 @@ async def list_chat_sessions(
     offset: int = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_student),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     List all chat sessions for the current user.
@@ -102,7 +105,7 @@ async def list_chat_sessions(
     **Student only.**
     """
     try:
-        chat_service = ChatService(db=db)
+        chat_service = ChatService(db=db, llm_service=llm_service)
 
         status_enum = None
         if status_filter:
@@ -141,6 +144,7 @@ async def get_chat_session(
     session_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     Get a specific chat session with all messages.
@@ -153,7 +157,7 @@ async def get_chat_session(
     **Authentication required.**
     """
     try:
-        chat_service = ChatService(db=db)
+        chat_service = ChatService(db=db, llm_service=llm_service)
 
         session = chat_service.get_session(
             session_id=session_id,
@@ -184,6 +188,7 @@ async def update_chat_session(
     request: ChatSessionUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     Update a chat session.
@@ -193,7 +198,7 @@ async def update_chat_session(
     **Admin only.**
     """
     try:
-        chat_service = ChatService(db=db)
+        chat_service = ChatService(db=db, llm_service=llm_service)
 
         status_enum = None
         if request.status:
@@ -235,6 +240,7 @@ async def delete_chat_session(
     session_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     Delete a chat session.
@@ -244,7 +250,7 @@ async def delete_chat_session(
     **Admin only.**
     """
     try:
-        chat_service = ChatService(db=db)
+        chat_service = ChatService(db=db, llm_service=llm_service)
 
         deleted = chat_service.delete_session(
             session_id=session_id,
@@ -275,6 +281,7 @@ async def send_message(
     request: ChatRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_student),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     Send a message in a chat session with streaming response.
@@ -292,7 +299,7 @@ async def send_message(
     """
     async def generate_stream():
         try:
-            chat_service = ChatService(db=db)
+            chat_service = ChatService(db=db, llm_service=llm_service)
 
             logger.info(
                 f"User {current_user.email} sending streaming message to session {session_id}"
