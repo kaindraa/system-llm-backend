@@ -346,96 +346,141 @@ class GCSStorageProvider(FileStorageProvider):
         Stream file from GCS in chunks (memory efficient).
 
         This is critical for production Cloud Run environments where memory is limited.
-        Instead of loading the entire file into memory, this streams it in chunks using
-        Google Cloud Storage's native download_as_bytes with range requests.
-
-        **Important**: For large files or unreliable connections, use get() instead
-        and implement client-side resumable downloads.
+        Uses simple download_as_bytes without blob.reload() to avoid timeouts.
         """
+        import time
+        stream_start_time = time.time()
+        download_start_time = None
+        offset = 0
+        chunk_num = 0
+
         try:
             blob_name = self._get_blob_name(file_id)
-            logger.info(f"[GCSStorageProvider.stream] Starting stream - file_id: {file_id}, blob_name: {blob_name}, chunk_size: {chunk_size}")
+            logger.info(
+                f"[GCSStorageProvider.stream] ▶ START - "
+                f"file_id={file_id}, blob_name={blob_name}, "
+                f"chunk_size={chunk_size}, bucket={self.bucket_name}"
+            )
 
             blob = self.bucket.blob(blob_name)
-            exists = blob.exists()
-            logger.info(f"[GCSStorageProvider.stream] Blob exists check: {exists}")
 
-            if not exists:
-                logger.error(f"[GCSStorageProvider.stream] File not found in GCS - file_id: {file_id}, blob_path: gs://{self.bucket_name}/{blob_name}")
-                raise FileNotFoundError(f"File not found in GCS: {file_id} (path: gs://{self.bucket_name}/{blob_name})")
+            # Check existence without full reload (faster)
+            try:
+                logger.debug(f"[GCSStorageProvider.stream] Checking blob existence...")
+                exists = blob.exists()
+                logger.info(f"[GCSStorageProvider.stream] ✓ Blob exists: {exists}")
 
-            # Get blob metadata to know total size for validation
-            blob.reload()  # Ensure metadata is fresh
-            total_size = blob.size
-            logger.info(f"[GCSStorageProvider.stream] Blob total size from metadata: {total_size} bytes")
+                if not exists:
+                    logger.error(
+                        f"[GCSStorageProvider.stream] ✗ FAIL - File not found in GCS - "
+                        f"file_id={file_id}, expected_path=gs://{self.bucket_name}/{blob_name}"
+                    )
+                    raise FileNotFoundError(f"File not found in GCS: {file_id}")
+            except Exception as exist_check_error:
+                logger.error(
+                    f"[GCSStorageProvider.stream] ✗ ERROR checking existence - "
+                    f"file_id={file_id}, error={type(exist_check_error).__name__}: {str(exist_check_error)}",
+                    exc_info=True
+                )
+                raise
 
-            if total_size == 0:
-                logger.warning(f"[GCSStorageProvider.stream] Blob size is 0 bytes - file might be corrupt")
-                # Yield empty iterator or raise error?
-                # For now, yield nothing (empty file)
-                return
+            # Download full file and stream in chunks
+            try:
+                download_start_time = time.time()
+                logger.info(f"[GCSStorageProvider.stream] ⬇ Downloading blob from GCS...")
 
-            # Stream file content in chunks using range requests
-            logger.info(f"[GCSStorageProvider.stream] Beginning chunked download from GCS - total_size: {total_size}")
+                full_content = blob.download_as_bytes()
+                download_duration = time.time() - download_start_time
 
-            offset = 0
-            chunks_count = 0
+                logger.info(
+                    f"[GCSStorageProvider.stream] ✓ Download complete - "
+                    f"duration={download_duration:.2f}s, size={len(full_content)} bytes, "
+                    f"speed={len(full_content)/download_duration/1024/1024:.2f} MB/s"
+                )
 
-            while offset < total_size:
-                try:
-                    # Download in chunks using range requests
-                    # Note: end_byte is INCLUSIVE in HTTP range requests
-                    end_byte = min(offset + chunk_size - 1, total_size - 1)
+                if not full_content:
+                    logger.warning(
+                        f"[GCSStorageProvider.stream] ⚠ WARNING - Downloaded content is EMPTY - "
+                        f"file_id={file_id}, this might indicate file corruption in GCS"
+                    )
+                    return
 
-                    logger.debug(f"[GCSStorageProvider.stream] Requesting chunk - offset: {offset}, end_byte: {end_byte}, expected_size: {end_byte - offset + 1}")
+                # Stream the downloaded content in chunks
+                offset = 0
+                chunk_num = 0
+                total_size = len(full_content)
+                total_bytes_yielded = 0
 
-                    chunk_data = blob.download_as_bytes(start=offset, end=end_byte)
-                    chunks_count += 1
+                logger.info(
+                    f"[GCSStorageProvider.stream] ⤴ Streaming content - "
+                    f"total_size={total_size} bytes, chunk_size={chunk_size}, "
+                    f"expected_chunks={(total_size + chunk_size - 1) // chunk_size}"
+                )
+
+                while offset < total_size:
+                    chunk_end = min(offset + chunk_size, total_size)
+                    chunk_data = full_content[offset:chunk_end]
+                    chunk_num += 1
+                    chunk_len = len(chunk_data)
 
                     if not chunk_data:
-                        logger.warning(f"[GCSStorageProvider.stream] Empty chunk received at offset {offset} (might indicate corruption)")
+                        logger.warning(
+                            f"[GCSStorageProvider.stream] ⚠ WARNING - Empty chunk at offset={offset}, "
+                            f"chunk_num={chunk_num}"
+                        )
                         break
 
-                    actual_chunk_size = len(chunk_data)
-                    logger.debug(f"[GCSStorageProvider.stream] Downloaded chunk #{chunks_count} - offset: {offset}, size: {actual_chunk_size}")
-
-                    # Validate chunk size
-                    expected_size = end_byte - offset + 1
-                    if actual_chunk_size != expected_size:
-                        logger.warning(
-                            f"[GCSStorageProvider.stream] Chunk size mismatch - "
-                            f"expected: {expected_size}, got: {actual_chunk_size} - "
-                            f"This might indicate file corruption!"
-                        )
-
-                    yield chunk_data
-                    offset += actual_chunk_size
-
-                except Exception as chunk_error:
-                    logger.error(
-                        f"[GCSStorageProvider.stream] Error downloading chunk #{chunks_count} at offset {offset}: {str(chunk_error)}",
-                        exc_info=True
+                    logger.debug(
+                        f"[GCSStorageProvider.stream] chunk#{chunk_num} - "
+                        f"offset={offset}, size={chunk_len}, range=[{offset}-{offset + chunk_len - 1}]/{total_size}"
                     )
-                    raise
 
-            # Validate total bytes downloaded matches expected size
-            if offset != total_size:
+                    total_bytes_yielded += chunk_len
+                    yield chunk_data
+                    offset = chunk_end
+
+                stream_duration = time.time() - stream_start_time
+                size_match = total_bytes_yielded == total_size
+
+                if size_match:
+                    logger.info(
+                        f"[GCSStorageProvider.stream] ✓ SUCCESS - "
+                        f"file_id={file_id}, chunks={chunk_num}, "
+                        f"total_size={total_size}, bytes_yielded={total_bytes_yielded}, "
+                        f"download_time={download_duration:.2f}s, total_time={stream_duration:.2f}s"
+                    )
+                else:
+                    logger.error(
+                        f"[GCSStorageProvider.stream] ✗ SIZE_MISMATCH - "
+                        f"file_id={file_id}, chunks={chunk_num}, "
+                        f"expected={total_size}, yielded={total_bytes_yielded}, "
+                        f"diff={total_size - total_bytes_yielded} bytes - FILE MAY BE CORRUPT!"
+                    )
+
+            except Exception as download_error:
+                elapsed = time.time() - stream_start_time
                 logger.error(
-                    f"[GCSStorageProvider.stream] Size mismatch after stream - "
-                    f"expected: {total_size}, downloaded: {offset} - "
-                    f"FILE MIGHT BE CORRUPT!"
+                    f"[GCSStorageProvider.stream] ✗ ERROR downloading - "
+                    f"file_id={file_id}, elapsed={elapsed:.2f}s, "
+                    f"offset={offset}, chunk_num={chunk_num}, "
+                    f"error={type(download_error).__name__}: {str(download_error)}",
+                    exc_info=True
                 )
-                # Don't raise - already streamed, but log for debugging
-            else:
-                logger.info(
-                    f"[GCSStorageProvider.stream] Successfully streamed file - "
-                    f"file_id: {file_id}, chunks: {chunks_count}, total_size: {offset} bytes"
-                )
+                raise
 
         except FileNotFoundError:
+            elapsed = time.time() - stream_start_time
+            logger.warning(f"[GCSStorageProvider.stream] ⏱ FileNotFoundError after {elapsed:.2f}s")
             raise
         except Exception as e:
-            logger.error(f"[GCSStorageProvider.stream] Error streaming file - file_id: {file_id}, error: {str(e)}", exc_info=True)
+            elapsed = time.time() - stream_start_time
+            logger.error(
+                f"[GCSStorageProvider.stream] ✗ FATAL ERROR - "
+                f"file_id={file_id}, elapsed={elapsed:.2f}s, "
+                f"offset={offset}, chunk_num={chunk_num}, "
+                f"error={type(e).__name__}: {str(e)}",
+                exc_info=True
+            )
             raise
 
 

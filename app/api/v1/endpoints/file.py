@@ -361,73 +361,139 @@ async def download_file(
 
     **Requires authentication. All users can download any file.**
     """
+    import time
+    request_start_time = time.time()
+    file_id_str = str(file_id)
+    user_id_str = str(current_user.id)
+
     try:
         file_service = FileService(db=db)
-        document = file_service.get_file(str(file_id))
 
-        # Allow all authenticated users to download files
-        logger.info(f"File download started by user {current_user.id}: {file_id} ({document.original_filename})")
+        logger.info(
+            f"[download_file] ▶ START - "
+            f"file_id={file_id_str}, user_id={user_id_str}"
+        )
+
+        # Get file metadata from database
+        try:
+            logger.debug(f"[download_file] 🔍 Querying database for file metadata...")
+            document = file_service.get_file(file_id_str)
+            logger.info(
+                f"[download_file] ✓ File metadata found - "
+                f"original_filename={document.original_filename}, "
+                f"file_size={document.file_size}, mime_type={document.mime_type}, "
+                f"status={document.status}, stored_filename={document.filename}"
+            )
+        except Exception as db_error:
+            logger.error(
+                f"[download_file] ✗ ERROR getting file metadata - "
+                f"file_id={file_id_str}, error={type(db_error).__name__}: {str(db_error)}",
+                exc_info=True
+            )
+            raise
 
         # Stream file content in chunks (memory efficient, especially for large files)
         # This is critical for production Cloud Run environments with limited memory
         def file_iterator():
             """Generator function to stream file content in chunks with integrity checking"""
             bytes_streamed = 0
+            chunks_yielded = 0
+            iterator_start_time = time.time()
+
             try:
-                for chunk in file_service.stream_file_content(str(file_id), chunk_size=1024 * 1024):  # 1MB chunks
-                    bytes_streamed += len(chunk)
+                logger.info(
+                    f"[download_file] ⤴ Starting stream - "
+                    f"file_id={file_id_str}, expected_size={document.file_size} bytes"
+                )
+
+                for chunk in file_service.stream_file_content(file_id_str, chunk_size=1024 * 1024):  # 1MB chunks
+                    chunk_len = len(chunk)
+                    bytes_streamed += chunk_len
+                    chunks_yielded += 1
+
+                    logger.debug(
+                        f"[download_file] chunk#{chunks_yielded} - "
+                        f"size={chunk_len}, total_so_far={bytes_streamed}/{document.file_size}"
+                    )
+
                     yield chunk
 
                 # Verify integrity: total bytes streamed should match expected file size
-                if bytes_streamed != document.file_size:
-                    logger.warning(
-                        f"File download integrity check - size mismatch: "
-                        f"expected: {document.file_size}, streamed: {bytes_streamed} - "
-                        f"FILE MIGHT BE CORRUPT - user: {current_user.id}, file: {file_id}"
-                    )
-                    # Still complete the download, but log the issue for investigation
-                else:
+                iterator_duration = time.time() - iterator_start_time
+                request_duration = time.time() - request_start_time
+
+                if bytes_streamed == document.file_size:
                     logger.info(
-                        f"File download completed successfully - "
-                        f"user: {current_user.id}, file_id: {file_id}, "
-                        f"size: {bytes_streamed} bytes"
+                        f"[download_file] ✓ SUCCESS - "
+                        f"file_id={file_id_str}, user_id={user_id_str}, "
+                        f"chunks={chunks_yielded}, size={bytes_streamed} bytes, "
+                        f"stream_time={iterator_duration:.2f}s, total_time={request_duration:.2f}s"
                     )
+                else:
+                    logger.error(
+                        f"[download_file] ✗ SIZE_MISMATCH - "
+                        f"file_id={file_id_str}, user_id={user_id_str}, "
+                        f"expected={document.file_size}, streamed={bytes_streamed}, "
+                        f"diff={document.file_size - bytes_streamed} bytes - FILE MAY BE CORRUPT! "
+                        f"stream_time={iterator_duration:.2f}s, total_time={request_duration:.2f}s"
+                    )
+
             except Exception as e:
+                iterator_duration = time.time() - iterator_start_time
+                request_duration = time.time() - request_start_time
                 logger.error(
-                    f"Error streaming file chunks - "
-                    f"user: {current_user.id}, file: {file_id}, "
-                    f"bytes_streamed_so_far: {bytes_streamed}, "
-                    f"expected_size: {document.file_size}, "
-                    f"error: {str(e)}",
+                    f"[download_file] ✗ ERROR streaming chunks - "
+                    f"file_id={file_id_str}, user_id={user_id_str}, "
+                    f"chunks_yielded={chunks_yielded}, bytes_so_far={bytes_streamed}, "
+                    f"expected_size={document.file_size}, "
+                    f"stream_time={iterator_duration:.2f}s, total_time={request_duration:.2f}s, "
+                    f"error={type(e).__name__}: {str(e)}",
                     exc_info=True
                 )
                 raise
 
         # Return file as streaming response with proper headers
-        # Include X-File-Size header for client-side validation
+        logger.debug(
+            f"[download_file] 📤 Preparing streaming response - "
+            f"content_type={document.mime_type or 'application/pdf'}"
+        )
+
         return StreamingResponse(
             file_iterator(),
             media_type=document.mime_type or "application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={document.original_filename}",
                 "Content-Type": document.mime_type or "application/pdf",
-                "Content-Length": str(document.file_size),  # Important for client validation
-                "X-File-ID": str(file_id),
+                "Content-Length": str(document.file_size),
+                "X-File-ID": file_id_str,
                 "X-File-Name": document.original_filename,
-                "X-File-Size": str(document.file_size),  # For client-side integrity check
-                "Cache-Control": "no-cache, no-store, must-revalidate",  # Don't cache file downloads
+                "X-File-Size": str(document.file_size),
+                "X-Request-Start": str(request_start_time),
+                "Cache-Control": "no-cache, no-store, must-revalidate",
             }
         )
 
     except FileNotFoundError:
+        logger.warning(
+            f"[download_file] ⚠ NOT_FOUND - "
+            f"file_id={file_id_str}, user_id={user_id_str}, "
+            f"elapsed={(time.time() - request_start_time):.2f}s"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File with ID '{file_id}' not found"
+            detail=f"File with ID '{file_id_str}' not found"
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error downloading file - file_id: {file_id}, user: {current_user.id}, error: {str(e)}", exc_info=True)
+        elapsed = time.time() - request_start_time
+        logger.error(
+            f"[download_file] ✗ FATAL ERROR - "
+            f"file_id={file_id_str}, user_id={user_id_str}, "
+            f"elapsed={elapsed:.2f}s, "
+            f"error={type(e).__name__}: {str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to download file: {str(e)}"
