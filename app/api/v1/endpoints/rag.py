@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, get_current_user, get_current_admin
 from app.services.rag import RAGService
-from app.services.rag_config_service import RAGConfigService
+from app.services.rag_config_service import ChatConfigService
 from app.models.user import User
 from app.schemas.rag import (
     RAGSearchResponse,
@@ -185,7 +185,7 @@ async def get_rag_settings(db: Session = Depends(get_db)):
     **No authentication required** (public endpoint for reading settings)
     """
     try:
-        config_service = RAGConfigService(db)
+        config_service = ChatConfigService(db)
         config = config_service.get_config()
         return RAGSettingsResponse(**config.to_dict())
     except Exception as e:
@@ -219,7 +219,7 @@ async def update_rag_settings(
     - `include_rag_instruction`: Include RAG instruction in system prompt
     """
     try:
-        config_service = RAGConfigService(db)
+        config_service = ChatConfigService(db)
 
         # Extract only the fields that were provided (not None)
         update_data = settings_update.model_dump(exclude_unset=True)
@@ -255,7 +255,7 @@ async def reset_rag_settings(
     **Requires:** Admin role
     """
     try:
-        config_service = RAGConfigService(db)
+        config_service = ChatConfigService(db)
         config = config_service.reset_to_defaults()
         logger.info(f"RAG settings reset by user {current_user.id}")
         return RAGSettingsResponse(**config.to_dict())

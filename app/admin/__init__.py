@@ -5,7 +5,7 @@ from app.admin.views import (
     DocumentAdmin,
     DocumentChunkAdmin,
     ChatSessionAdmin,
-    RAGConfigAdmin,
+    ChatConfigAdmin,
 )
 
 __all__ = [
@@ -15,5 +15,5 @@ __all__ = [
     "DocumentAdmin",
     "DocumentChunkAdmin",
     "ChatSessionAdmin",
-    "RAGConfigAdmin",
+    "ChatConfigAdmin",
 ]

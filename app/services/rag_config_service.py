@@ -1,34 +1,35 @@
 """
-RAG Configuration Service
+Chat Configuration Service
 
-Manages RAG system settings from database.
-Provides CRUD operations for RAG configuration.
+Manages chat system settings from database.
+Provides CRUD operations for chat configuration (RAG parameters + prompt_general).
 """
 
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
-from app.models.rag_config import RAGConfig
+from app.models.chat_config import ChatConfig
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class RAGConfigService:
-    """Service for managing RAG configuration."""
+class ChatConfigService:
+    """Service for managing chat configuration."""
 
     def __init__(self, db: Session):
         """Initialize with database session."""
         self.db = db
 
     @staticmethod
-    def _ensure_config_exists(db: Session) -> RAGConfig:
+    def _ensure_config_exists(db: Session) -> ChatConfig:
         """Ensure singleton config row exists, create if not."""
-        config = db.query(RAGConfig).filter(RAGConfig.id == 1).first()
+        config = db.query(ChatConfig).filter(ChatConfig.id == 1).first()
 
         if not config:
-            logger.info("RAG config not found, creating default...")
-            config = RAGConfig(
+            logger.info("Chat config not found, creating default...")
+            config = ChatConfig(
                 id=1,
+                prompt_general=None,
                 default_top_k=5,
                 max_top_k=10,
                 similarity_threshold=0.7,
@@ -39,33 +40,35 @@ class RAGConfigService:
             db.add(config)
             db.commit()
             db.refresh(config)
-            logger.info("RAG config created with defaults")
+            logger.info("Chat config created with defaults")
 
         return config
 
-    def get_config(self) -> RAGConfig:
-        """Get current RAG configuration."""
-        config = self.db.query(RAGConfig).filter(RAGConfig.id == 1).first()
+    def get_config(self) -> ChatConfig:
+        """Get current chat configuration."""
+        config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
 
         if not config:
             config = self._ensure_config_exists(self.db)
 
-        logger.debug(f"Retrieved RAG config: {config.to_dict()}")
+        logger.debug(f"Retrieved chat config: {config.to_dict()}")
         return config
 
     def update_config(
         self,
+        prompt_general: Optional[str] = None,
         default_top_k: Optional[int] = None,
         max_top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
         tool_calling_max_iterations: Optional[int] = None,
         tool_calling_enabled: Optional[bool] = None,
         include_rag_instruction: Optional[bool] = None,
-    ) -> RAGConfig:
+    ) -> ChatConfig:
         """
-        Update RAG configuration.
+        Update chat configuration.
 
         Args:
+            prompt_general: System-wide general prompt
             default_top_k: Default number of search results
             max_top_k: Maximum number of search results
             similarity_threshold: Minimum similarity score (0-1)
@@ -74,9 +77,13 @@ class RAGConfigService:
             include_rag_instruction: Include RAG instruction in system prompt
 
         Returns:
-            Updated RAGConfig object
+            Updated ChatConfig object
         """
         config = self.get_config()
+
+        # Update prompt_general if provided
+        if prompt_general is not None:
+            config.prompt_general = prompt_general
 
         # Update fields if provided
         if default_top_k is not None:
@@ -108,13 +115,14 @@ class RAGConfigService:
         self.db.commit()
         self.db.refresh(config)
 
-        logger.info(f"RAG config updated: {config.to_dict()}")
+        logger.info(f"Chat config updated: {config.to_dict()}")
         return config
 
-    def reset_to_defaults(self) -> RAGConfig:
+    def reset_to_defaults(self) -> ChatConfig:
         """Reset configuration to default values."""
         config = self.get_config()
 
+        config.prompt_general = None
         config.default_top_k = 5
         config.max_top_k = 10
         config.similarity_threshold = 0.7
@@ -125,7 +133,7 @@ class RAGConfigService:
         self.db.commit()
         self.db.refresh(config)
 
-        logger.info("RAG config reset to defaults")
+        logger.info("Chat config reset to defaults")
         return config
 
     def get_config_dict(self) -> Dict[str, Any]:

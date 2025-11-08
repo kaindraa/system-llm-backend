@@ -15,7 +15,7 @@ from app.admin import (
     DocumentAdmin,
     DocumentChunkAdmin,
     ChatSessionAdmin,
-    RAGConfigAdmin,
+    ChatConfigAdmin,
 )
 from app.services.file_service import initialize_storage_provider
 from app.services.llm import LLMService
@@ -135,7 +135,7 @@ admin.add_view(PromptAdmin)
 admin.add_view(DocumentAdmin)
 admin.add_view(DocumentChunkAdmin)
 admin.add_view(ChatSessionAdmin)
-admin.add_view(RAGConfigAdmin)
+admin.add_view(ChatConfigAdmin)
 
 # Startup event
 @app.on_event("startup")

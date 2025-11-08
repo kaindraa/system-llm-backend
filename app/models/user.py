@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Enum as SQLEnum, DateTime
+from sqlalchemy import Column, String, Text, Enum as SQLEnum, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -24,6 +24,11 @@ class User(Base):
     role = Column(SQLEnum(UserRole), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Learning profile (used for chat conversations)
+    task = Column(Text, nullable=True)                # e.g., "Learn machine learning"
+    persona = Column(Text, nullable=True)             # e.g., "Curious student"
+    mission_objective = Column(Text, nullable=True)   # e.g., "Master neural networks"
 
     # Relationships
     chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")

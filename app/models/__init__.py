@@ -11,6 +11,7 @@ from app.models.prompt import Prompt
 from app.models.document import Document, DocumentStatus
 from app.models.document_chunk import DocumentChunk
 from app.models.chat_session import ChatSession, SessionStatus, ComprehensionLevel
+from app.models.chat_config import ChatConfig
 
 __all__ = [
     # Models
@@ -20,6 +21,7 @@ __all__ = [
     "Document",
     "DocumentChunk",
     "ChatSession",
+    "ChatConfig",
     # Enums
     "UserRole",
     "DocumentStatus",

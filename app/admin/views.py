@@ -5,7 +5,7 @@ from app.models.prompt import Prompt
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.chat_session import ChatSession
-from app.models.rag_config import RAGConfig
+from app.models.chat_config import ChatConfig
 
 
 class UserAdmin(ModelView, model=User):
@@ -16,14 +16,14 @@ class UserAdmin(ModelView, model=User):
     icon = "fa-solid fa-user"
 
     # List view configuration
-    column_list = [User.id, User.email, User.full_name, User.role, User.created_at]
+    column_list = [User.id, User.email, User.full_name, User.role, User.task, User.persona, User.created_at]
     column_searchable_list = [User.email, User.full_name]
     column_sortable_list = [User.email, User.full_name, User.role, User.created_at]
     column_default_sort = [(User.created_at, True)]  # Descending
 
     # Detail view configuration
-    column_details_exclude_list = [User.password_hash]
-    form_excluded_columns = [User.password_hash, User.created_at, User.updated_at]
+    column_details_exclude_list = [User.password_hash, User.chat_sessions]
+    form_excluded_columns = [User.password_hash, User.created_at, User.updated_at, User.chat_sessions]
 
     # Permissions
     can_create = True
@@ -38,6 +38,9 @@ class UserAdmin(ModelView, model=User):
         User.email: "Email",
         User.full_name: "Full Name",
         User.role: "Role",
+        User.task: "Task",
+        User.persona: "Persona",
+        User.mission_objective: "Mission Objective",
         User.created_at: "Created",
         User.updated_at: "Updated",
     }
@@ -214,6 +217,10 @@ class ChatSessionAdmin(ModelView, model=ChatSession):
         ChatSession.user_id,
         ChatSession.model_id,
         ChatSession.status,
+        ChatSession.prompt_general,
+        ChatSession.task,
+        ChatSession.persona,
+        ChatSession.mission_objective,
         ChatSession.comprehension_level,
         ChatSession.started_at,
     ]
@@ -245,6 +252,10 @@ class ChatSessionAdmin(ModelView, model=ChatSession):
         ChatSession.title: "Title",
         ChatSession.messages: "Messages (JSON)",
         ChatSession.status: "Status",
+        ChatSession.prompt_general: "General Prompt",
+        ChatSession.task: "Task",
+        ChatSession.persona: "Persona",
+        ChatSession.mission_objective: "Mission/Objective",
         ChatSession.total_messages: "Total Messages",
         ChatSession.comprehension_level: "Comprehension",
         ChatSession.summary: "Summary",
@@ -254,28 +265,29 @@ class ChatSessionAdmin(ModelView, model=ChatSession):
     }
 
 
-class RAGConfigAdmin(ModelView, model=RAGConfig):
-    """Admin view for RAG Configuration (System Settings)"""
+class ChatConfigAdmin(ModelView, model=ChatConfig):
+    """Admin view for Chat Configuration (System Settings)"""
 
-    name = "RAG Settings"
-    name_plural = "RAG Settings"
+    name = "Chat Config"
+    name_plural = "Chat Config"
     icon = "fa-solid fa-gears"
 
     # List view
     column_list = [
-        RAGConfig.id,
-        RAGConfig.default_top_k,
-        RAGConfig.max_top_k,
-        RAGConfig.similarity_threshold,
-        RAGConfig.tool_calling_enabled,
-        RAGConfig.updated_at,
+        ChatConfig.id,
+        ChatConfig.prompt_general,
+        ChatConfig.default_top_k,
+        ChatConfig.max_top_k,
+        ChatConfig.similarity_threshold,
+        ChatConfig.tool_calling_enabled,
+        ChatConfig.updated_at,
     ]
     column_searchable_list = []  # No searchable columns
-    column_sortable_list = [RAGConfig.updated_at]
-    column_default_sort = [(RAGConfig.updated_at, True)]
+    column_sortable_list = [ChatConfig.updated_at]
+    column_default_sort = [(ChatConfig.updated_at, True)]
 
     # Detail view - exclude timestamp (auto-updated)
-    form_excluded_columns = [RAGConfig.updated_at]
+    form_excluded_columns = [ChatConfig.updated_at]
 
     # Permissions - Full control for system settings
     can_create = False  # Singleton table, only one config allowed
@@ -285,18 +297,23 @@ class RAGConfigAdmin(ModelView, model=RAGConfig):
 
     page_size = 1  # Only one config record
     column_labels = {
-        RAGConfig.id: "Config ID",
-        RAGConfig.default_top_k: "Default Top-K Results",
-        RAGConfig.max_top_k: "Maximum Top-K Results",
-        RAGConfig.similarity_threshold: "Similarity Threshold (0-1)",
-        RAGConfig.tool_calling_max_iterations: "Tool Calling Max Iterations",
-        RAGConfig.tool_calling_enabled: "Tool Calling Enabled",
-        RAGConfig.include_rag_instruction: "Include RAG Instruction in Prompts",
-        RAGConfig.updated_at: "Last Updated",
+        ChatConfig.id: "Config ID",
+        ChatConfig.prompt_general: "General System Prompt",
+        ChatConfig.default_top_k: "Default Top-K Results",
+        ChatConfig.max_top_k: "Maximum Top-K Results",
+        ChatConfig.similarity_threshold: "Similarity Threshold (0-1)",
+        ChatConfig.tool_calling_max_iterations: "Tool Calling Max Iterations",
+        ChatConfig.tool_calling_enabled: "Tool Calling Enabled",
+        ChatConfig.include_rag_instruction: "Include RAG Instruction in Prompts",
+        ChatConfig.updated_at: "Last Updated",
     }
 
     # Form configuration with descriptions
     form_args = {
+        "prompt_general": {
+            "label": "General System Prompt",
+            "description": "System-wide general prompt that applies to all chat sessions",
+        },
         "default_top_k": {
             "label": "Default Top-K Results",
             "description": "Default number of document chunks to return in semantic search (1-100)",

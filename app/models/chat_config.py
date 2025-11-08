@@ -1,21 +1,24 @@
 """
-RAG Configuration Model
+Chat Configuration Model
 
-Stores RAG system settings that can be configured via API.
+Stores system-wide chat settings (RAG parameters + general prompt).
 Singleton pattern - only one row in this table (id=1).
 """
 
-from sqlalchemy import Column, Integer, Float, DateTime
+from sqlalchemy import Column, Integer, Float, Text, DateTime
 from sqlalchemy.sql import func
 from app.core.database import Base
 
 
-class RAGConfig(Base):
-    """RAG system configuration settings."""
-    __tablename__ = "rag_config"
+class ChatConfig(Base):
+    """Chat system configuration settings."""
+    __tablename__ = "chat_config"
 
     # Singleton pattern: always id=1
     id = Column(Integer, primary_key=True, default=1)
+
+    # General system prompt (for all users/sessions)
+    prompt_general = Column(Text, nullable=True)
 
     # Semantic search parameters
     default_top_k = Column(Integer, default=5, nullable=False)
@@ -33,12 +36,13 @@ class RAGConfig(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
-        return f"<RAGConfig(top_k={self.default_top_k}, threshold={self.similarity_threshold})>"
+        return f"<ChatConfig(top_k={self.default_top_k}, threshold={self.similarity_threshold})>"
 
     def to_dict(self):
         """Convert to dictionary for API responses."""
         return {
             "id": self.id,
+            "prompt_general": self.prompt_general,
             "default_top_k": self.default_top_k,
             "max_top_k": self.max_top_k,
             "similarity_threshold": self.similarity_threshold,

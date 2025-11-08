@@ -33,7 +33,11 @@ class ChatService:
         user_id: UUID,
         model_id: str,
         title: Optional[str] = None,
-        prompt_id: Optional[UUID] = None
+        prompt_id: Optional[UUID] = None,
+        prompt_general: Optional[str] = None,
+        task: Optional[str] = None,
+        persona: Optional[str] = None,
+        mission_objective: Optional[str] = None
     ) -> ChatSession:
         """Create a new chat session.
 
@@ -65,7 +69,11 @@ class ChatService:
             prompt_id=prompt_id,
             messages=[],
             status=SessionStatus.ACTIVE,
-            total_messages=0
+            total_messages=0,
+            prompt_general=prompt_general,
+            task=task,
+            persona=persona,
+            mission_objective=mission_objective
         )
 
         self.db.add(session)
@@ -216,18 +224,46 @@ class ChatService:
         """
         Build conversation context from session messages.
 
+        Concatenates 5 prompt sources in order:
+        1. prompt_general (from ChatConfig singleton)
+        2. task (from User profile)
+        3. persona (from User profile)
+        4. mission_objective (from User profile)
+        5. prompt content (from Prompt table)
+
         Args:
             session: Chat session
             include_rag_instruction: Whether to add RAG instruction to system prompt (None = use database config)
         """
         context = []
 
-        # Get system prompt from database or use default
-        system_content = ""
+        # Build concatenated system prompt from 5 sources
+        prompt_parts = []
+
+        # 1. Get prompt_general from ChatSession
+        if session.prompt_general:
+            prompt_parts.append(session.prompt_general)
+
+        # 2. Get task from ChatSession
+        if session.task:
+            prompt_parts.append(session.task)
+
+        # 3. Get persona from ChatSession
+        if session.persona:
+            prompt_parts.append(session.persona)
+
+        # 4. Get mission_objective from ChatSession
+        if session.mission_objective:
+            prompt_parts.append(session.mission_objective)
+
+        # 5. Get prompt content from Prompt table
         if session.prompt_id:
             prompt = self.db.query(Prompt).filter(Prompt.id == session.prompt_id).first()
             if prompt:
-                system_content = prompt.content
+                prompt_parts.append(prompt.content)
+
+        # Concatenate all parts with double newline separator
+        system_content = "\n\n".join(prompt_parts) if prompt_parts else ""
 
         # Get RAG instruction setting from database if not explicitly provided
         if include_rag_instruction is None:

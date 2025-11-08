@@ -74,13 +74,33 @@ class ChatSessionCreate(BaseModel):
         default=None,
         description="System prompt to use (from database)"
     )
+    prompt_general: Optional[str] = Field(
+        default=None,
+        description="General system prompt text for this session"
+    )
+    task: Optional[str] = Field(
+        default=None,
+        description="Task description for this session"
+    )
+    persona: Optional[str] = Field(
+        default=None,
+        description="AI persona/role for this session"
+    )
+    mission_objective: Optional[str] = Field(
+        default=None,
+        description="Mission or objective for this session"
+    )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "model_id": "gpt-4.1-nano",
                 "title": "Learning about Machine Learning",
-                "prompt_id": None
+                "prompt_id": None,
+                "prompt_general": "You are a helpful tutor...",
+                "task": "Teach student about neural networks",
+                "persona": "Expert ML instructor",
+                "mission_objective": "Student understands backpropagation"
             }
         }
 
@@ -114,6 +134,10 @@ class ChatSessionResponse(BaseModel):
     prompt_id: Optional[UUID] = Field(None, description="Prompt ID")
     title: Optional[str] = Field(None, description="Session title")
     status: str = Field(..., description="Session status")
+    prompt_general: Optional[str] = Field(None, description="General system prompt")
+    task: Optional[str] = Field(None, description="Task description")
+    persona: Optional[str] = Field(None, description="AI persona/role")
+    mission_objective: Optional[str] = Field(None, description="Mission or objective")
     total_messages: int = Field(..., description="Total messages in session")
     started_at: datetime = Field(..., description="When session started")
     ended_at: Optional[datetime] = Field(None, description="When session ended")

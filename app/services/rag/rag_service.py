@@ -28,14 +28,14 @@ class RAGService:
         self._config = None
 
     def _get_config(self):
-        """Lazy load RAG config from database."""
+        """Lazy load chat config from database."""
         if self._config is None:
             try:
-                from app.services.rag_config_service import RAGConfigService
-                config_service = RAGConfigService(self.db)
+                from app.services.rag_config_service import ChatConfigService
+                config_service = ChatConfigService(self.db)
                 self._config = config_service.get_config_dict()
             except Exception as e:
-                logger.warning(f"Failed to load RAG config from database: {e}, using defaults")
+                logger.warning(f"Failed to load chat config from database: {e}, using defaults")
                 # Fallback to hardcoded defaults
                 self._config = {
                     "default_top_k": 5,

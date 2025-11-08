@@ -181,6 +181,7 @@ class GCSStorageProvider(FileStorageProvider):
             # Initialize GCS client
             if credentials_path and os.path.exists(credentials_path):
                 # Use service account credentials from file
+                logger.info(f"[GCSStorageProvider.__init__] Using credentials from file: {credentials_path}")
                 credentials = service_account.Credentials.from_service_account_file(
                     credentials_path
                 )
@@ -188,22 +189,31 @@ class GCSStorageProvider(FileStorageProvider):
                     credentials=credentials,
                     project=project_id or credentials.project_id
                 )
-                logger.info(f"GCSStorageProvider initialized with credentials from {credentials_path}")
+                logger.info(f"[GCSStorageProvider.__init__] Client initialized with service account credentials")
             else:
                 # Use default application credentials (e.g., from Cloud Run environment)
+                logger.info(f"[GCSStorageProvider.__init__] Using default application credentials (ADC/IAM)")
                 self.client = gcs_storage.Client(project=project_id)
-                logger.info("GCSStorageProvider initialized with default application credentials")
+                logger.info(f"[GCSStorageProvider.__init__] Client initialized with default credentials")
 
             self.bucket = self.client.bucket(self.bucket_name)
+            logger.info(f"[GCSStorageProvider.__init__] Bucket reference created: {self.bucket_name}")
 
-            # Verify bucket exists
-            if not self.bucket.exists():
-                raise ValueError(f"GCS bucket does not exist: {self.bucket_name}")
+            # Verify bucket exists and is accessible
+            logger.info(f"[GCSStorageProvider.__init__] Verifying bucket exists...")
+            try:
+                exists = self.bucket.exists()
+                logger.info(f"[GCSStorageProvider.__init__] Bucket exists check result: {exists}")
+                if not exists:
+                    raise ValueError(f"GCS bucket does not exist or is not accessible: {self.bucket_name}")
+            except Exception as check_error:
+                logger.error(f"[GCSStorageProvider.__init__] Error checking bucket existence: {str(check_error)}", exc_info=True)
+                raise ValueError(f"Cannot access GCS bucket '{self.bucket_name}': {str(check_error)}")
 
-            logger.info(f"GCSStorageProvider initialized with bucket: {self.bucket_name}")
+            logger.info(f"[GCSStorageProvider.__init__] Successfully initialized with bucket: gs://{self.bucket_name}")
 
         except Exception as e:
-            logger.error(f"Error initializing GCSStorageProvider: {str(e)}")
+            logger.error(f"[GCSStorageProvider.__init__] Initialization failed: {str(e)}", exc_info=True)
             raise
 
     def _get_blob_name(self, file_id: str) -> str:
@@ -235,21 +245,29 @@ class GCSStorageProvider(FileStorageProvider):
         """Retrieve file from GCS"""
         try:
             blob_name = self._get_blob_name(file_id)
-            blob = self.bucket.blob(blob_name)
+            logger.info(f"[GCSStorageProvider.get] file_id: {file_id}, blob_name: {blob_name}, bucket: {self.bucket_name}")
 
-            if not blob.exists():
-                raise FileNotFoundError(f"File not found in GCS: {file_id}")
+            blob = self.bucket.blob(blob_name)
+            logger.info(f"[GCSStorageProvider.get] Created blob reference: gs://{self.bucket_name}/{blob_name}")
+
+            exists = blob.exists()
+            logger.info(f"[GCSStorageProvider.get] Blob exists check result: {exists}")
+
+            if not exists:
+                logger.error(f"[GCSStorageProvider.get] File not found in GCS - file_id: {file_id}, blob_path: gs://{self.bucket_name}/{blob_name}")
+                raise FileNotFoundError(f"File not found in GCS: {file_id} (path: gs://{self.bucket_name}/{blob_name})")
 
             # Download file content
+            logger.info(f"[GCSStorageProvider.get] Downloading content from blob...")
             content = blob.download_as_bytes()
 
-            logger.info(f"File retrieved successfully from GCS: {file_id}")
+            logger.info(f"[GCSStorageProvider.get] File retrieved successfully - file_id: {file_id}, size: {len(content)} bytes")
             return content
 
         except FileNotFoundError:
             raise
         except Exception as e:
-            logger.error(f"Error retrieving file from GCS {file_id}: {str(e)}")
+            logger.error(f"[GCSStorageProvider.get] Error retrieving file - file_id: {file_id}, error: {str(e)}", exc_info=True)
             raise
 
     def delete(self, file_id: str) -> None:
@@ -378,8 +396,18 @@ class FileService:
         Returns:
             File content as bytes
         """
+        self.logger.info(f"[FileService.get_file_content] Starting - file_id: {file_id}")
         document = self.get_file(file_id)
-        return self.storage.get(document.filename)
+        self.logger.info(f"[FileService.get_file_content] Document found - filename: {document.filename}, file_path: {document.file_path}")
+        self.logger.info(f"[FileService.get_file_content] Storage provider: {self.storage.__class__.__name__}")
+
+        try:
+            content = self.storage.get(document.filename)
+            self.logger.info(f"[FileService.get_file_content] Successfully retrieved content - size: {len(content)} bytes")
+            return content
+        except Exception as e:
+            self.logger.error(f"[FileService.get_file_content] Failed to retrieve file - file_id: {file_id}, error: {str(e)}", exc_info=True)
+            raise
 
     def list_files(
         self,

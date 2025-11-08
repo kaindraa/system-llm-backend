@@ -36,6 +36,13 @@ class ChatSession(Base):
 
     status = Column(SQLEnum(SessionStatus), default=SessionStatus.ACTIVE, index=True)
 
+    # Prompt fields - stored for tracking the concatenated prompt that was used
+    # Order: prompt_general + task + persona + mission_objective (from Prompt table handled separately)
+    prompt_general = Column(Text, nullable=True)        # From ChatConfig
+    task = Column(Text, nullable=True)                  # From User profile
+    persona = Column(Text, nullable=True)               # From User profile
+    mission_objective = Column(Text, nullable=True)     # From User profile
+
     # Analytics fields (Stage 9)
     total_messages = Column(Integer, default=0)
     comprehension_level = Column(SQLEnum(ComprehensionLevel), nullable=True)

@@ -1,7 +1,7 @@
 """Create rag_config table for RAG system settings.
 
 Revision ID: g2c3d4e5f6a7
-Revises: f1a2b3c4d5e6
+Revises: 022f19bc9ea0
 Create Date: 2025-11-08 02:55:00.000000
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'g2c3d4e5f6a7'
-down_revision = 'f1a2b3c4d5e6'
+down_revision = '022f19bc9ea0'
 branch_labels = None
 depends_on = None
 

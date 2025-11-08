@@ -65,7 +65,11 @@ async def create_chat_session(
             user_id=current_user.id,
             model_id=request.model_id,
             title=request.title,
-            prompt_id=request.prompt_id
+            prompt_id=request.prompt_id,
+            prompt_general=request.prompt_general,
+            task=request.task,
+            persona=request.persona,
+            mission_objective=request.mission_objective
         )
 
         # DEBUG: Log created session
