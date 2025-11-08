@@ -25,6 +25,27 @@ class RAGService:
         """Initialize RAG service with database session."""
         self.db = db
         self._embeddings_client = None
+        self._config = None
+
+    def _get_config(self):
+        """Lazy load RAG config from database."""
+        if self._config is None:
+            try:
+                from app.services.rag_config_service import RAGConfigService
+                config_service = RAGConfigService(self.db)
+                self._config = config_service.get_config_dict()
+            except Exception as e:
+                logger.warning(f"Failed to load RAG config from database: {e}, using defaults")
+                # Fallback to hardcoded defaults
+                self._config = {
+                    "default_top_k": 5,
+                    "max_top_k": 10,
+                    "similarity_threshold": 0.7,
+                    "tool_calling_max_iterations": 10,
+                    "tool_calling_enabled": True,
+                    "include_rag_instruction": True
+                }
+        return self._config
 
     def _get_embeddings_client(self):
         """Lazy load embeddings client."""
@@ -72,16 +93,16 @@ class RAGService:
     def semantic_search(
         self,
         query_text: str,
-        top_k: int = 5,
-        similarity_threshold: float = 0.7
+        top_k: Optional[int] = None,
+        similarity_threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic search using pgvector cosine similarity.
 
         Args:
             query_text: Query text to search for
-            top_k: Number of top results to return
-            similarity_threshold: Minimum similarity score (0-1, ignored if negative)
+            top_k: Number of top results to return (None = use database config)
+            similarity_threshold: Minimum similarity score (0-1, None = use database config)
 
         Returns:
             List of dicts with keys: content, document_id, filename, page,
@@ -91,6 +112,21 @@ class RAGService:
             RuntimeError: If search fails
         """
         try:
+            # Get config from database (with fallback defaults)
+            config = self._get_config()
+
+            # Use provided values or fallback to config
+            if top_k is None:
+                top_k = config.get("default_top_k", 5)
+            if similarity_threshold is None:
+                similarity_threshold = config.get("similarity_threshold", 0.7)
+
+            # Enforce max limits from config
+            max_top_k = config.get("max_top_k", 10)
+            if top_k > max_top_k:
+                top_k = max_top_k
+                logger.debug(f"top_k limited to max_top_k ({max_top_k})")
+
             # Generate query embedding
             query_embedding = self.generate_embedding(query_text)
 
@@ -239,6 +275,15 @@ class RAGService:
         except Exception as e:
             logger.error(f"Failed to get user documents: {e}")
             raise RuntimeError(f"Failed to get user documents: {e}")
+
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Get current RAG configuration.
+
+        Returns:
+            Dict with all RAG configuration settings from database
+        """
+        return self._get_config()
 
     def health_check(self) -> Dict[str, Any]:
         """

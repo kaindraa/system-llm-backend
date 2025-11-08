@@ -211,13 +211,13 @@ class ChatService:
             "assistant_message": assistant_message
         }
 
-    def _build_conversation_context(self, session: ChatSession, include_rag_instruction: bool = True) -> List[Dict[str, str]]:
+    def _build_conversation_context(self, session: ChatSession, include_rag_instruction: Optional[bool] = None) -> List[Dict[str, str]]:
         """
         Build conversation context from session messages.
 
         Args:
             session: Chat session
-            include_rag_instruction: Whether to add RAG instruction to system prompt
+            include_rag_instruction: Whether to add RAG instruction to system prompt (None = use database config)
         """
         context = []
 
@@ -227,6 +227,16 @@ class ChatService:
             prompt = self.db.query(Prompt).filter(Prompt.id == session.prompt_id).first()
             if prompt:
                 system_content = prompt.content
+
+        # Get RAG instruction setting from database if not explicitly provided
+        if include_rag_instruction is None:
+            try:
+                rag_service = RAGService(self.db)
+                config = rag_service.get_config()
+                include_rag_instruction = config.get("include_rag_instruction", True)
+            except Exception as e:
+                logger.warning(f"Failed to load RAG config, using default include_rag_instruction=True: {e}")
+                include_rag_instruction = True
 
         # Add RAG instruction if enabled (for tool-aware models)
         if include_rag_instruction:

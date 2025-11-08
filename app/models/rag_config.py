@@ -2,9 +2,10 @@
 RAG Configuration Model
 
 Stores RAG system settings that can be configured via API.
+Singleton pattern - only one row in this table (id=1).
 """
 
-from sqlalchemy import Column, Float, Integer, DateTime
+from sqlalchemy import Column, Integer, Float, DateTime
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -13,8 +14,7 @@ class RAGConfig(Base):
     """RAG system configuration settings."""
     __tablename__ = "rag_config"
 
-    # Only one row in this table - singleton pattern
-    # We use a fixed id=1 to ensure uniqueness
+    # Singleton pattern: always id=1
     id = Column(Integer, primary_key=True, default=1)
 
     # Semantic search parameters
@@ -24,10 +24,10 @@ class RAGConfig(Base):
 
     # Tool calling parameters
     tool_calling_max_iterations = Column(Integer, default=10, nullable=False)
-    tool_calling_enabled = Column(Integer, default=1, nullable=False)  # SQLite doesn't have Boolean
+    tool_calling_enabled = Column(Integer, default=1, nullable=False)  # 1=True, 0=False
 
     # RAG instruction in system prompt
-    include_rag_instruction = Column(Integer, default=1, nullable=False)
+    include_rag_instruction = Column(Integer, default=1, nullable=False)  # 1=True, 0=False
 
     # Metadata
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -38,6 +38,7 @@ class RAGConfig(Base):
     def to_dict(self):
         """Convert to dictionary for API responses."""
         return {
+            "id": self.id,
             "default_top_k": self.default_top_k,
             "max_top_k": self.max_top_k,
             "similarity_threshold": self.similarity_threshold,

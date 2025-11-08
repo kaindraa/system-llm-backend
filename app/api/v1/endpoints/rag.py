@@ -7,15 +7,18 @@ Provides RAG health check, configuration, and direct search capabilities.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, get_current_user
+from app.api.dependencies import get_db, get_current_user, get_current_admin
 from app.services.rag import RAGService
+from app.services.rag_config_service import RAGConfigService
 from app.models.user import User
 from app.schemas.rag import (
     RAGSearchResponse,
     RAGConfigResponse,
     RAGHealthResponse,
     RAGSearchResult,
-    RAGSource
+    RAGSource,
+    RAGSettingsResponse,
+    RAGSettingsUpdate
 )
 from app.core.logging import get_logger
 
@@ -167,3 +170,95 @@ async def rag_configuration(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to get RAG config: {e}")
         raise HTTPException(status_code=500, detail=f"Config retrieval failed: {str(e)}")
+
+
+@router.get("/settings", response_model=RAGSettingsResponse)
+async def get_rag_settings(db: Session = Depends(get_db)):
+    """
+    Get current RAG system settings from database.
+
+    Returns all configurable RAG parameters:
+    - Search parameters: default_top_k, max_top_k, similarity_threshold
+    - Tool calling settings: max_iterations, enabled flag
+    - System behavior: include_rag_instruction flag
+
+    **No authentication required** (public endpoint for reading settings)
+    """
+    try:
+        config_service = RAGConfigService(db)
+        config = config_service.get_config()
+        return RAGSettingsResponse(**config.to_dict())
+    except Exception as e:
+        logger.error(f"Failed to get RAG settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Settings retrieval failed: {str(e)}")
+
+
+@router.put("/settings", response_model=RAGSettingsResponse)
+async def update_rag_settings(
+    settings_update: RAGSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """
+    Update RAG system settings.
+
+    Only admins can modify RAG settings. All fields are optional; only provided
+    fields will be updated. Each parameter is validated:
+    - top_k values: 1-100
+    - similarity_threshold: 0-1
+    - tool_calling_max_iterations: 1-100
+
+    **Requires:** Admin role
+
+    **Parameters:**
+    - `default_top_k`: Default number of search results
+    - `max_top_k`: Maximum number of search results
+    - `similarity_threshold`: Minimum similarity score (0-1)
+    - `tool_calling_max_iterations`: Max tool calling loop iterations
+    - `tool_calling_enabled`: Enable/disable LLM tool calling
+    - `include_rag_instruction`: Include RAG instruction in system prompt
+    """
+    try:
+        config_service = RAGConfigService(db)
+
+        # Extract only the fields that were provided (not None)
+        update_data = settings_update.model_dump(exclude_unset=True)
+
+        config = config_service.update_config(**update_data)
+        logger.info(f"RAG settings updated by user {current_user.id}")
+        return RAGSettingsResponse(**config.to_dict())
+    except ValueError as e:
+        # Validation error from service
+        logger.warning(f"RAG settings validation error: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid settings: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to update RAG settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Settings update failed: {str(e)}")
+
+
+@router.post("/settings/reset", response_model=RAGSettingsResponse)
+async def reset_rag_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """
+    Reset RAG settings to default values.
+
+    Resets all RAG configuration to predefined defaults:
+    - default_top_k: 5
+    - max_top_k: 10
+    - similarity_threshold: 0.7
+    - tool_calling_max_iterations: 10
+    - tool_calling_enabled: true
+    - include_rag_instruction: true
+
+    **Requires:** Admin role
+    """
+    try:
+        config_service = RAGConfigService(db)
+        config = config_service.reset_to_defaults()
+        logger.info(f"RAG settings reset by user {current_user.id}")
+        return RAGSettingsResponse(**config.to_dict())
+    except Exception as e:
+        logger.error(f"Failed to reset RAG settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Settings reset failed: {str(e)}")

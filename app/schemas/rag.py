@@ -189,6 +189,54 @@ class RAGSearchEvent(BaseModel):
     results_count: Optional[int] = Field(None, description="Number of results (only when status=completed)")
 
 
+class RAGSettingsResponse(BaseModel):
+    """RAG system settings from database."""
+    id: int = Field(..., description="Config ID (always 1 - singleton)")
+    default_top_k: int = Field(..., description="Default number of search results", ge=1, le=100)
+    max_top_k: int = Field(..., description="Maximum number of search results", ge=1, le=100)
+    similarity_threshold: float = Field(..., description="Minimum similarity score (0-1)", ge=0, le=1)
+    tool_calling_max_iterations: int = Field(..., description="Max tool calling iterations", ge=1, le=100)
+    tool_calling_enabled: bool = Field(..., description="Enable/disable tool calling")
+    include_rag_instruction: bool = Field(..., description="Include RAG instruction in system prompt")
+    updated_at: Optional[str] = Field(None, description="ISO timestamp of last update")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "default_top_k": 5,
+                "max_top_k": 10,
+                "similarity_threshold": 0.7,
+                "tool_calling_max_iterations": 10,
+                "tool_calling_enabled": True,
+                "include_rag_instruction": True,
+                "updated_at": "2025-11-08T10:30:00Z"
+            }
+        }
+
+
+class RAGSettingsUpdate(BaseModel):
+    """Request body for updating RAG settings."""
+    default_top_k: Optional[int] = Field(None, description="Default number of search results", ge=1, le=100)
+    max_top_k: Optional[int] = Field(None, description="Maximum number of search results", ge=1, le=100)
+    similarity_threshold: Optional[float] = Field(None, description="Minimum similarity score (0-1)", ge=0, le=1)
+    tool_calling_max_iterations: Optional[int] = Field(None, description="Max tool calling iterations", ge=1, le=100)
+    tool_calling_enabled: Optional[bool] = Field(None, description="Enable/disable tool calling")
+    include_rag_instruction: Optional[bool] = Field(None, description="Include RAG instruction in system prompt")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "default_top_k": 5,
+                "max_top_k": 10,
+                "similarity_threshold": 0.7,
+                "tool_calling_max_iterations": 10,
+                "tool_calling_enabled": True,
+                "include_rag_instruction": True
+            }
+        }
+
+
 class ChatMessageWithSources(BaseModel):
     """Chat message with optional source citations."""
     role: str = Field(..., description="Message role (user/assistant/system)")

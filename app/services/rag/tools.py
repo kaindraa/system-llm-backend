@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 class SemanticSearchInput(BaseModel):
     """Input schema for semantic search tool."""
     query: str = Field(..., description="The search query or question to find relevant documents for")
-    top_k: int = Field(default=5, description="Number of results to return (default: 5, max: 10)")
+    top_k: int = Field(default=5, ge=1, le=100, description="Number of results to return (default from config, max: from config)")
 
 
 class RAGToolFactory:
@@ -39,7 +39,7 @@ class RAGToolFactory:
             Langchain Tool object
         """
 
-        def semantic_search_impl(query: str, top_k: int = 5) -> Dict[str, Any]:
+        def semantic_search_impl(query: str, top_k: int = None) -> Dict[str, Any]:
             """
             Search for relevant documents using semantic similarity.
 
@@ -48,7 +48,7 @@ class RAGToolFactory:
 
             Args:
                 query: The search query or question (required, must not be empty)
-                top_k: Maximum number of document chunks to return (default: 5, recommended: 3-10)
+                top_k: Maximum number of document chunks to return (None = use config default)
 
             Returns:
                 Dictionary containing:
@@ -62,20 +62,32 @@ class RAGToolFactory:
                 If user asks "Difference between X and Y", search for documents comparing them.
             """
             try:
-                # Validate and constrain top_k
+                # Validate query
                 if not isinstance(query, str) or not query.strip():
                     logger.error(f"Invalid query: empty or non-string (got: {repr(query)})")
                     raise ValueError("Query must be a non-empty string")
 
-                top_k = max(1, min(int(top_k), 10))  # Constrain to 1-10
+                # Get config from RAG service
+                config = self.rag_service.get_config()
+
+                # Use provided top_k or fallback to config default
+                if top_k is None:
+                    top_k = config.get("default_top_k", 5)
+
+                # Enforce max limit from config
+                max_top_k = config.get("max_top_k", 10)
+                top_k = max(1, min(int(top_k), max_top_k))
 
                 logger.info(f"RAG tool called: semantic_search(query='{query}', top_k={top_k})")
+
+                # Get similarity threshold from config (slightly relaxed for tool usage)
+                similarity_threshold = max(config.get("similarity_threshold", 0.7) - 0.05, 0.0)
 
                 # Perform semantic search
                 chunks = self.rag_service.semantic_search(
                     query_text=query,
                     top_k=top_k,
-                    similarity_threshold=0.65  # Slightly relaxed for tool usage
+                    similarity_threshold=similarity_threshold
                 )
 
                 # Extract unique sources
@@ -118,7 +130,10 @@ class RAGToolFactory:
             if not query:
                 raise ValueError("query parameter is required")
 
-            top_k = kwargs.get("top_k", 5)
+            # Get top_k from kwargs, or None to let semantic_search_impl use config default
+            top_k = kwargs.get("top_k")
+            if top_k is not None:
+                top_k = int(top_k)
 
             logger.debug(f"Tool wrapper received kwargs: {kwargs}, extracted query: {query}, top_k: {top_k}")
 
@@ -136,9 +151,13 @@ Pass the user's question or search terms as the query parameter.
 
 IMPORTANT: Always provide a clear, specific search query based on what the user is asking about.
 
+The tool uses configurable parameters from the RAG system:
+- Default results (top_k) and max results are controlled by RAG settings
+- Similarity threshold is automatically adjusted from system settings
+
 Parameters:
     query (REQUIRED string): The search query or question. Examples: "What is NAT?", "explain OSPF", "speech processing"
-    top_k (optional integer): Number of document chunks to return (default 5, max 10)
+    top_k (optional integer): Number of document chunks to return (uses database config if not specified)
 
 Returns a dictionary with:
     - results: List of matching document chunks with content, filename, page number

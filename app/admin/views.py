@@ -5,6 +5,7 @@ from app.models.prompt import Prompt
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.chat_session import ChatSession
+from app.models.rag_config import RAGConfig
 
 
 class UserAdmin(ModelView, model=User):
@@ -250,4 +251,74 @@ class ChatSessionAdmin(ModelView, model=ChatSession):
         ChatSession.started_at: "Started At",
         ChatSession.ended_at: "Ended At",
         ChatSession.analyzed_at: "Analyzed At",
+    }
+
+
+class RAGConfigAdmin(ModelView, model=RAGConfig):
+    """Admin view for RAG Configuration (System Settings)"""
+
+    name = "RAG Settings"
+    name_plural = "RAG Settings"
+    icon = "fa-solid fa-gears"
+
+    # List view
+    column_list = [
+        RAGConfig.id,
+        RAGConfig.default_top_k,
+        RAGConfig.max_top_k,
+        RAGConfig.similarity_threshold,
+        RAGConfig.tool_calling_enabled,
+        RAGConfig.updated_at,
+    ]
+    column_searchable_list = []  # No searchable columns
+    column_sortable_list = [RAGConfig.updated_at]
+    column_default_sort = [(RAGConfig.updated_at, True)]
+
+    # Detail view - exclude timestamp (auto-updated)
+    form_excluded_columns = [RAGConfig.updated_at]
+
+    # Permissions - Full control for system settings
+    can_create = False  # Singleton table, only one config allowed
+    can_edit = True     # Allow editing all settings
+    can_delete = False  # Cannot delete system config
+    can_view_details = True
+
+    page_size = 1  # Only one config record
+    column_labels = {
+        RAGConfig.id: "Config ID",
+        RAGConfig.default_top_k: "Default Top-K Results",
+        RAGConfig.max_top_k: "Maximum Top-K Results",
+        RAGConfig.similarity_threshold: "Similarity Threshold (0-1)",
+        RAGConfig.tool_calling_max_iterations: "Tool Calling Max Iterations",
+        RAGConfig.tool_calling_enabled: "Tool Calling Enabled",
+        RAGConfig.include_rag_instruction: "Include RAG Instruction in Prompts",
+        RAGConfig.updated_at: "Last Updated",
+    }
+
+    # Form configuration with descriptions
+    form_args = {
+        "default_top_k": {
+            "label": "Default Top-K Results",
+            "description": "Default number of document chunks to return in semantic search (1-100)",
+        },
+        "max_top_k": {
+            "label": "Maximum Top-K Results",
+            "description": "Maximum allowed number of results per search request (1-100)",
+        },
+        "similarity_threshold": {
+            "label": "Similarity Threshold",
+            "description": "Minimum similarity score required for results (0.0 to 1.0, where 1.0 is most similar)",
+        },
+        "tool_calling_max_iterations": {
+            "label": "Tool Calling Max Iterations",
+            "description": "Maximum number of times the LLM can call tools in a single message (1-100)",
+        },
+        "tool_calling_enabled": {
+            "label": "Enable Tool Calling",
+            "description": "Allow LLM to use semantic_search tool during chat",
+        },
+        "include_rag_instruction": {
+            "label": "Include RAG Instruction",
+            "description": "Add RAG instruction to system prompt to guide LLM to use tools",
+        },
     }
