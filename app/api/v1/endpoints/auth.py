@@ -4,8 +4,11 @@ from app.core.database import get_db
 from app.api.dependencies import get_current_user
 from app.services import auth as auth_service
 from app.schemas.auth import UserRegister, UserLogin, Token
-from app.schemas.user import UserResponse
+from app.schemas.user import UserResponse, UserProfileUpdate
 from app.models.user import User
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -90,5 +93,62 @@ async def get_current_user_info(
     Get current authenticated user information.
 
     Requires valid JWT token in Authorization header.
+    Returns user profile including task, persona, and mission_objective.
     """
     return current_user
+
+
+@router.put("/me", response_model=UserResponse)
+async def update_user_profile(
+    profile_update: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update current user's learning profile.
+
+    Allows user to update:
+    - **task**: Learning task or current focus
+    - **persona**: Preferred AI persona/role
+    - **mission_objective**: Learning goal or objective
+
+    All fields are optional. Omitted fields are not updated.
+    """
+    try:
+        # Get the user from database
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Update fields if provided
+        if profile_update.task is not None:
+            user.task = profile_update.task
+            logger.info(f"Updated task for user {user.id}")
+
+        if profile_update.persona is not None:
+            user.persona = profile_update.persona
+            logger.info(f"Updated persona for user {user.id}")
+
+        if profile_update.mission_objective is not None:
+            user.mission_objective = profile_update.mission_objective
+            logger.info(f"Updated mission_objective for user {user.id}")
+
+        # Save changes
+        db.commit()
+        db.refresh(user)
+
+        logger.info(f"User profile updated: {user.id}")
+        return user
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating user profile: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user profile: {str(e)}"
+        )

@@ -21,6 +21,9 @@ class UserResponse(UserBase):
     """Schema for user response (without password)"""
     id: UUID
     role: UserRole
+    task: Optional[str] = None
+    persona: Optional[str] = None
+    mission_objective: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -30,6 +33,13 @@ class UserResponse(UserBase):
     def serialize_id(self, value: UUID) -> str:
         """Convert UUID to string for JSON serialization"""
         return str(value)
+
+
+class UserProfileUpdate(BaseModel):
+    """Schema for updating user learning profile"""
+    task: Optional[str] = None
+    persona: Optional[str] = None
+    mission_objective: Optional[str] = None
 
 
 class UserInDB(UserBase):
