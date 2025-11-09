@@ -192,6 +192,7 @@ class RAGSearchEvent(BaseModel):
 class RAGSettingsResponse(BaseModel):
     """RAG system settings from database."""
     id: int = Field(..., description="Config ID (always 1 - singleton)")
+    prompt_general: str = Field(..., description="General system prompt prepended to all conversations")
     default_top_k: int = Field(..., description="Default number of search results", ge=1, le=100)
     max_top_k: int = Field(..., description="Maximum number of search results", ge=1, le=100)
     similarity_threshold: float = Field(..., description="Minimum similarity score (0-1)", ge=0, le=1)
@@ -204,6 +205,7 @@ class RAGSettingsResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "id": 1,
+                "prompt_general": "You are a helpful AI assistant...",
                 "default_top_k": 5,
                 "max_top_k": 10,
                 "similarity_threshold": 0.7,
@@ -217,6 +219,7 @@ class RAGSettingsResponse(BaseModel):
 
 class RAGSettingsUpdate(BaseModel):
     """Request body for updating RAG settings."""
+    prompt_general: Optional[str] = Field(None, description="General system prompt prepended to all conversations")
     default_top_k: Optional[int] = Field(None, description="Default number of search results", ge=1, le=100)
     max_top_k: Optional[int] = Field(None, description="Maximum number of search results", ge=1, le=100)
     similarity_threshold: Optional[float] = Field(None, description="Minimum similarity score (0-1)", ge=0, le=1)
@@ -227,6 +230,7 @@ class RAGSettingsUpdate(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
+                "prompt_general": "You are a helpful AI assistant...",
                 "default_top_k": 5,
                 "max_top_k": 10,
                 "similarity_threshold": 0.7,
