@@ -14,7 +14,7 @@ from enum import Enum
 class SessionStatus(str, Enum):
     """Chat session status"""
     ACTIVE = "active"
-    COMPLETED = "completed"
+    ANALYZED = "analyzed"  # Session has been analyzed
 
 
 class MessageRole(str, Enum):

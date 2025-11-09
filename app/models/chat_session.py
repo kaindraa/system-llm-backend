@@ -10,7 +10,7 @@ import enum
 class SessionStatus(str, enum.Enum):
     """Chat session status"""
     ACTIVE = "active"
-    COMPLETED = "completed"
+    ANALYZED = "analyzed"  # Session has been analyzed
 
 
 class ComprehensionLevel(str, enum.Enum):
@@ -34,7 +34,8 @@ class ChatSession(Base):
     # Format: [{"role": "user|assistant|system", "content": "...", "created_at": "...", "sources": [...]}]
     messages = Column(JSONB, nullable=False, default=list)
 
-    status = Column(SQLEnum(SessionStatus), default=SessionStatus.ACTIVE, index=True)
+    # Store as String to match database (lowercase values: 'active', 'analyzed')
+    status = Column(String(50), default="active", index=True)
 
     # Prompt fields - stored for tracking the concatenated prompt that was used
     # Order: prompt_general + task + persona + mission_objective (from Prompt table handled separately)
@@ -45,7 +46,9 @@ class ChatSession(Base):
 
     # Analytics fields
     total_messages = Column(Integer, default=0)
-    comprehension_level = Column(SQLEnum(ComprehensionLevel), nullable=True)
+    # Store as String to avoid SQLAlchemy Enum uppercase conversion issues
+    # Valid values: "low", "medium", "high" (lowercase only)
+    comprehension_level = Column(String(50), nullable=True)
     summary = Column(Text, nullable=True)
 
     # Timestamps

@@ -631,6 +631,7 @@ class ChatService:
             logger.info(f"[ANALYSIS] Saving to database with level: {comprehension_level_raw}")
             # Store comprehension_level as lowercase string ("low", "medium", "high")
             session.comprehension_level = comprehension_level_raw
+            session.status = "analyzed"  # Update status to analyzed
             session.ended_at = datetime.utcnow()
             session.analyzed_at = datetime.utcnow()
 
