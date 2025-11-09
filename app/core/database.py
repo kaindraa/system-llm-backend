@@ -7,9 +7,10 @@ from app.core.config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,      # Verify connections before using
-    pool_size=5,             # Connection pool size
-    max_overflow=10,         # Max overflow connections
+    pool_size=20,            # Connection pool size (increased from 5)
+    max_overflow=40,         # Max overflow connections (increased from 10)
     pool_recycle=3600,       # Recycle connections every hour
+    pool_timeout=60,         # Timeout 60 seconds (increased from 30)
     connect_args={
         "connect_timeout": 10,
     },
