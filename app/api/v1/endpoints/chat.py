@@ -13,7 +13,7 @@ import json
 
 from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student, get_llm_service
 from app.models.user import User
-from app.models.chat_session import SessionStatus
+from app.models.chat_session import SessionStatus, ChatSession
 from app.models.model import Model
 from app.models.prompt import Prompt
 from app.schemas.chat import (
@@ -453,7 +453,7 @@ async def get_chat_config(
 async def analyze_chat_session(
     session_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_student),
+    current_user: User = Depends(get_current_user),
     llm_service: LLMService = Depends(get_llm_service),
 ):
     """
@@ -462,14 +462,30 @@ async def analyze_chat_session(
     Generates a summary and comprehension level assessment based on the conversation history.
     Results are saved to the database.
 
-    **Student only.**
+    Students can only analyze their own sessions.
+    Admins can analyze any session.
+
+    **Authenticated users only.**
     """
     try:
         chat_service = ChatService(db=db, llm_service=llm_service)
 
+        # For students, analyze only their own session
+        # For admins, get the actual session first to find the real user_id
+        if current_user.role == "admin":
+            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Session {session_id} not found"
+                )
+            user_id_for_analysis = session.user_id
+        else:
+            user_id_for_analysis = current_user.id
+
         analysis = await chat_service.analyze_session(
             session_id=session_id,
-            user_id=current_user.id
+            user_id=user_id_for_analysis
         )
 
         if not analysis:
