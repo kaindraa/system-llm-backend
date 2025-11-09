@@ -173,10 +173,17 @@ async def get_chat_session(
     try:
         chat_service = ChatService(db=db, llm_service=llm_service)
 
-        session = chat_service.get_session(
-            session_id=session_id,
-            user_id=current_user.id
-        )
+        # Admins can view any session, students can only view their own
+        if current_user.role == "admin":
+            # Admin: fetch session without user_id filter
+            from app.models.chat_session import ChatSession as ChatSessionModel
+            session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+        else:
+            # Student: fetch only their own session
+            session = chat_service.get_session(
+                session_id=session_id,
+                user_id=current_user.id
+            )
 
         if not session:
             raise HTTPException(

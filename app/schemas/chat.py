@@ -141,6 +141,9 @@ class ChatSessionResponse(BaseModel):
     total_messages: int = Field(..., description="Total messages in session")
     started_at: datetime = Field(..., description="When session started")
     ended_at: Optional[datetime] = Field(None, description="When session ended")
+    summary: Optional[str] = Field(None, description="Session analysis summary")
+    comprehension_level: Optional[str] = Field(None, description="Comprehension level (LOW/MEDIUM/HIGH)")
+    analyzed_at: Optional[datetime] = Field(None, description="When session was analyzed")
 
     class Config:
         from_attributes = True
