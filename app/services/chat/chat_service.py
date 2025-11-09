@@ -80,7 +80,15 @@ class ChatService:
         self.db.commit()
         self.db.refresh(session)
 
-        logger.info(f"Created chat session {session.id} for user {user_id} with prompt_id={prompt_id}")
+        # Log session creation with all prompt fields
+        logger.info(f"[SERVICE] Created chat session {session.id} for user {user_id}")
+        logger.info("[SERVICE] Session Prompt Configuration:")
+        logger.info(f"  - prompt_id (from Prompt table): {session.prompt_id}")
+        logger.info(f"  - prompt_general: {session.prompt_general if session.prompt_general else '(not set)'}")
+        logger.info(f"  - task: {session.task if session.task else '(not set)'}")
+        logger.info(f"  - persona: {session.persona if session.persona else '(not set)'}")
+        logger.info(f"  - mission_objective: {session.mission_objective if session.mission_objective else '(not set)'}")
+
         return session
 
     def get_session(self, session_id: UUID, user_id: UUID) -> Optional[ChatSession]:
@@ -171,6 +179,19 @@ class ChatService:
         if session.status != SessionStatus.ACTIVE:
             raise ValueError(f"Session {session_id} is not active")
 
+        # Build conversation context to get system prompt
+        conversation_context = self._build_conversation_context(session)
+
+        # Extract system message from context (first message with role: "system")
+        system_message = None
+        if conversation_context and conversation_context[0].get("role") == "system":
+            system_message = {
+                "role": "system",
+                "content": conversation_context[0]["content"],
+                "created_at": datetime.utcnow().isoformat(),
+                "sources": None
+            }
+
         user_message = {
             "role": "user",
             "content": message_content,
@@ -178,7 +199,6 @@ class ChatService:
             "sources": None
         }
 
-        conversation_context = self._build_conversation_context(session)
         conversation_context.append({
             "role": "user",
             "content": message_content
@@ -202,6 +222,10 @@ class ChatService:
             "created_at": datetime.utcnow().isoformat(),
             "sources": None
         }
+
+        # Add system message only if it's the first message (not already in session)
+        if system_message and len(session.messages) == 0:
+            session.messages.append(system_message)
 
         session.messages.append(user_message)
         session.messages.append(assistant_message)
@@ -287,6 +311,16 @@ class ChatService:
             )
             system_content = system_content + rag_instruction if system_content else rag_instruction
 
+        # Log the complete concatenated system prompt
+        if system_content:
+            logger.info(f"[CONTEXT] Session {session.id} - Building conversation context")
+            logger.info("=" * 100)
+            logger.info("[FINAL SYSTEM PROMPT (Concatenated)]:")
+            logger.info("-" * 100)
+            logger.info(system_content)
+            logger.info("-" * 100)
+            logger.info("=" * 100)
+
         if system_content:
             context.append({
                 "role": "system",
@@ -361,6 +395,19 @@ class ChatService:
         if session.status != SessionStatus.ACTIVE:
             raise ValueError(f"Session {session_id} is not active")
 
+        # Build conversation context to get system prompt
+        conversation_context = self._build_conversation_context(session)
+
+        # Extract system message from context (first message with role: "system")
+        system_message = None
+        if conversation_context and conversation_context[0].get("role") == "system":
+            system_message = {
+                "role": "system",
+                "content": conversation_context[0]["content"],
+                "created_at": datetime.utcnow().isoformat(),
+                "sources": None
+            }
+
         # Create user message
         user_message = {
             "role": "user",
@@ -372,8 +419,7 @@ class ChatService:
         # Yield user message first
         yield {"type": "user_message", "content": user_message}
 
-        # Build conversation context
-        conversation_context = self._build_conversation_context(session)
+        # Add user message to conversation context
         conversation_context.append({
             "role": "user",
             "content": message_content
@@ -489,6 +535,10 @@ class ChatService:
         }
 
         # Save messages to database
+        # Add system message only if it's the first message (not already in session)
+        if system_message and len(session.messages) == 0:
+            session.messages.append(system_message)
+
         session.messages.append(user_message)
         session.messages.append(assistant_message)
         session.total_messages = len(session.messages)

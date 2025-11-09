@@ -59,6 +59,15 @@ async def create_chat_session(
         logger.info(f"[CREATE_SESSION] Request received from user {current_user.id}")
         logger.info(f"[CREATE_SESSION] Request data: model_id={request.model_id}, title={request.title}, prompt_id={request.prompt_id}")
 
+        # Log all prompt fields in detail
+        logger.info("=" * 80)
+        logger.info("[CREATE_SESSION] PROMPT CONFIGURATION DETAILS:")
+        logger.info(f"  prompt_general: {request.prompt_general if request.prompt_general else '(not provided)'}")
+        logger.info(f"  task: {request.task if request.task else '(not provided)'}")
+        logger.info(f"  persona: {request.persona if request.persona else '(not provided)'}")
+        logger.info(f"  mission_objective: {request.mission_objective if request.mission_objective else '(not provided)'}")
+        logger.info("=" * 80)
+
         chat_service = ChatService(db=db, llm_service=llm_service)
 
         session = chat_service.create_session(

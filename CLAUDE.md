@@ -1724,6 +1724,125 @@ Check disk space
 
 ---
 
-**Last Updated:** November 8, 2025
+---
+
+## Session 3: Chat Session Prompt Fields Logging
+
+### 3.1 Detailed Logging untuk Chat Session Creation
+
+**Purpose**: Menampilkan semua prompt fields yang diberikan user ketika membuat chat session, agar mudah debug dan monitoring.
+
+**Changes Made**:
+
+#### 1. File: `app/api/v1/endpoints/chat.py` (create_chat_session)
+```python
+# Log all prompt fields in detail
+logger.info("=" * 80)
+logger.info("[CREATE_SESSION] PROMPT CONFIGURATION DETAILS:")
+logger.info(f"  prompt_general: {request.prompt_general if request.prompt_general else '(not provided)'}")
+logger.info(f"  task: {request.task if request.task else '(not provided)'}")
+logger.info(f"  persona: {request.persona if request.persona else '(not provided)'}")
+logger.info(f"  mission_objective: {request.mission_objective if request.mission_objective else '(not provided)'}")
+logger.info("=" * 80)
+```
+
+#### 2. File: `app/services/chat/chat_service.py` (create_session)
+```python
+# Log session creation with all prompt fields
+logger.info(f"[SERVICE] Created chat session {session.id} for user {user_id}")
+logger.info("[SERVICE] Session Prompt Configuration:")
+logger.info(f"  - prompt_id (from Prompt table): {session.prompt_id}")
+logger.info(f"  - prompt_general: {session.prompt_general if session.prompt_general else '(not set)'}")
+logger.info(f"  - task: {session.task if session.task else '(not set)'}")
+logger.info(f"  - persona: {session.persona if session.persona else '(not set)'}")
+logger.info(f"  - mission_objective: {session.mission_objective if session.mission_objective else '(not set)'}")
+```
+
+#### 3. File: `.env`
+Changed `DEBUG=false` to `DEBUG=true` untuk memastikan semua log INFO ditampilkan.
+
+**Logging Output Example**:
+
+Ketika user membuat chat session dengan semua prompt fields:
+```
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO - [CREATE_SESSION] Request received from user 660e8400-e29b-41d4-a716-446655440000
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO - [CREATE_SESSION] Request data: model_id=gpt-4.1-nano, title=ML Learning Session, prompt_id=None
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO - ================================================================================
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO - [CREATE_SESSION] PROMPT CONFIGURATION DETAILS:
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO -   prompt_general: You are an expert tutor in machine learning...
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO -   task: Teach the student about neural networks
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO -   persona: Expert ML instructor with 10 years experience
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO -   mission_objective: Student fully understands backpropagation
+2025-11-09 20:30:15 - system_llm.app.api.v1.endpoints.chat - INFO - ================================================================================
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO - [SERVICE] Created chat session 550e8400-e29b-41d4-a716-446655440000 for user 660e8400-e29b-41d4-a716-446655440000
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO - [SERVICE] Session Prompt Configuration:
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO -   - prompt_id (from Prompt table): None
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO -   - prompt_general: You are an expert tutor in machine learning...
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO -   - task: Teach the student about neural networks
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO -   - persona: Expert ML instructor with 10 years experience
+2025-11-09 20:30:15 - system_llm.app.services.chat.chat_service - INFO -   - mission_objective: Student fully understands backpropagation
+```
+
+**How to View Logs**:
+
+1. **Console Output (Real-time)**:
+   ```bash
+   # Logs akan muncul di terminal/console ketika app berjalan
+   docker-compose logs -f backend
+   ```
+
+2. **Log Files** (dalam folder `logs/`):
+   - `logs/app.log` - Semua logs (INFO, WARNING, ERROR, DEBUG)
+   - `logs/error.log` - Hanya ERROR level logs
+
+3. **View specific session**:
+   ```bash
+   # Cari logs dari session ID tertentu
+   grep "550e8400-e29b-41d4-a716-446655440000" logs/app.log
+   ```
+
+4. **Format Logging**:
+   - Timestamp: `YYYY-MM-DD HH:MM:SS`
+   - Logger name: `system_llm.module.name`
+   - Level: `DEBUG|INFO|WARNING|ERROR|CRITICAL`
+   - Message: Deskripsi log
+
+**Files Modified**:
+- `app/api/v1/endpoints/chat.py` - Added detailed prompt logging
+- `app/services/chat/chat_service.py` - Added service-level logging
+- `.env` - Set `DEBUG=true`
+
+**Testing**:
+```bash
+# 1. Restart backend application
+docker-compose restart backend
+
+# 2. Create chat session via API
+curl -X POST http://localhost:8000/api/v1/chat/sessions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "model_id": "gpt-4.1-nano",
+    "title": "Test Session",
+    "prompt_general": "You are a helpful assistant",
+    "task": "Help with learning",
+    "persona": "Expert tutor",
+    "mission_objective": "Student understands concepts"
+  }'
+
+# 3. Check logs
+docker-compose logs backend | grep CREATE_SESSION
+# OR
+tail -f logs/app.log | grep CREATE_SESSION
+```
+
+**Next Session Tasks**:
+- Monitor logging for production issues
+- Add request/response JSON logging for debugging
+- Implement structured logging (JSON format) for log aggregation services
+
+---
+
+**Last Updated:** November 9, 2025
 **Maintained By:** System LLM Team
-**Version:** 2.1 (RAG with Tool Calling)
+**Version:** 2.2 (Chat Session Prompt Logging)
