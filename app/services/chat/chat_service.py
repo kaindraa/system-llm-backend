@@ -13,6 +13,7 @@ from uuid import UUID
 from app.models.chat_session import ChatSession, SessionStatus
 from app.models.model import Model
 from app.models.prompt import Prompt
+from app.models.chat_config import ChatConfig
 from app.services.llm import LLMService
 from app.services.rag import RAGService, create_rag_tools
 from app.core.logging import get_logger
@@ -544,3 +545,124 @@ class ChatService:
 
         # Yield done signal with assistant message
         yield {"type": "done", "content": assistant_message}
+
+    async def analyze_session(
+        self,
+        session_id: UUID,
+        user_id: UUID
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Analyze a completed chat session.
+
+        Generates summary and comprehension level assessment based on conversation history.
+        Saves results to session.analysis JSONB field.
+
+        Args:
+            session_id: Chat session ID
+            user_id: User ID
+
+        Returns:
+            Dict with analysis results or None if session not found
+        """
+        session = self.get_session(session_id, user_id)
+        if not session:
+            return None
+
+        if not session.messages:
+            raise ValueError(f"Session {session_id} has no messages to analyze")
+
+        try:
+            # Get analysis prompt from ChatConfig
+            chat_config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
+            if not chat_config or not chat_config.analysis_prompt:
+                raise ValueError("Analysis prompt not configured in ChatConfig")
+
+            # Build analysis context
+            # Convert messages to readable format
+            messages_text = self._format_messages_for_analysis(session.messages)
+
+            # Prepare analysis prompt with conversation history
+            analysis_context = [
+                {
+                    "role": "system",
+                    "content": chat_config.analysis_prompt
+                },
+                {
+                    "role": "user",
+                    "content": f"Please analyze the following chat session and provide summary and comprehension level assessment:\n\n{messages_text}"
+                }
+            ]
+
+            logger.info(f"[ANALYSIS] Session {session_id}: Starting analysis...")
+
+            # Call LLM to generate analysis
+            analysis_json = await self.llm_service.generate_async(
+                model_id=str(session.model_id),
+                messages=analysis_context
+            )
+
+            logger.info(f"[ANALYSIS] Session {session_id}: Raw LLM response received")
+
+            # Parse LLM response as JSON
+            import json
+            analysis_data = json.loads(analysis_json)
+
+            # Extract summary and comprehension_level from LLM response
+            summary = analysis_data.get("summary", "")
+            comprehension_level = analysis_data.get("comprehension_level", "").lower()
+
+            # Validate
+            if not summary or not comprehension_level:
+                raise ValueError("Invalid analysis response from LLM")
+
+            if comprehension_level not in ["low", "medium", "high"]:
+                raise ValueError(f"Invalid comprehension level: {comprehension_level}")
+
+            # Save to database columns
+            from app.models.chat_session import ComprehensionLevel
+            session.summary = summary
+            session.comprehension_level = ComprehensionLevel(comprehension_level)
+            session.ended_at = datetime.utcnow()
+            session.analyzed_at = datetime.utcnow()
+
+            self.db.commit()
+            self.db.refresh(session)
+
+            logger.info(f"[ANALYSIS] Session {session_id}: Analysis completed - Level: {comprehension_level}")
+
+            return {
+                "session_id": session.id,
+                "summary": summary,
+                "comprehension_level": comprehension_level.upper(),
+                "analyzed_at": datetime.utcnow().isoformat()
+            }
+
+        except json.JSONDecodeError as e:
+            logger.error(f"[ANALYSIS] Session {session_id}: Failed to parse LLM response as JSON: {str(e)}")
+            raise ValueError("LLM response could not be parsed as JSON")
+        except Exception as e:
+            logger.error(f"[ANALYSIS] Session {session_id}: Error during analysis: {str(e)}", exc_info=True)
+            raise
+
+    def _format_messages_for_analysis(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        Format messages array into readable text for analysis.
+
+        Args:
+            messages: List of message dicts from session.messages
+
+        Returns:
+            Formatted text representation of conversation
+        """
+        formatted = []
+
+        for msg in messages:
+            role = msg.get("role", "unknown").upper()
+            content = msg.get("content", "")
+
+            if role == "SYSTEM":
+                continue  # Skip system messages in formatted output
+
+            formatted.append(f"{role}: {content}")
+
+        return "\n\n".join(formatted)

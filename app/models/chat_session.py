@@ -15,9 +15,9 @@ class SessionStatus(str, enum.Enum):
 
 class ComprehensionLevel(str, enum.Enum):
     """Student comprehension level from analytics"""
-    BASIC = "basic"
-    INTERMEDIATE = "intermediate"
-    ADVANCED = "advanced"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class ChatSession(Base):
@@ -43,10 +43,10 @@ class ChatSession(Base):
     persona = Column(Text, nullable=True)               # From User profile
     mission_objective = Column(Text, nullable=True)     # From User profile
 
-    # Analytics fields (Stage 9)
+    # Analytics fields
     total_messages = Column(Integer, default=0)
     comprehension_level = Column(SQLEnum(ComprehensionLevel), nullable=True)
-    summary = Column(Text)
+    summary = Column(Text, nullable=True)
 
     # Timestamps
     started_at = Column(DateTime(timezone=True), server_default=func.now())

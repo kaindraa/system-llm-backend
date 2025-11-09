@@ -28,6 +28,7 @@ from app.schemas.chat import (
     ConfigResponse,
     ModelInfo,
     PromptInfo,
+    SessionAnalysisResponse,
 )
 from app.services.chat import ChatService
 from app.services.llm import LLMService
@@ -429,4 +430,49 @@ async def get_chat_config(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get config: {str(e)}"
+        )
+
+
+@router.post("/sessions/{session_id}/analysis", response_model=SessionAnalysisResponse)
+async def analyze_chat_session(
+    session_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_student),
+    llm_service: LLMService = Depends(get_llm_service),
+):
+    """
+    Analyze a completed chat session.
+
+    Generates a summary and comprehension level assessment based on the conversation history.
+    Results are saved to the database.
+
+    **Student only.**
+    """
+    try:
+        chat_service = ChatService(db=db, llm_service=llm_service)
+
+        analysis = await chat_service.analyze_session(
+            session_id=session_id,
+            user_id=current_user.id
+        )
+
+        if not analysis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session {session_id} not found"
+            )
+
+        return analysis
+
+    except ValueError as e:
+        logger.error(f"Invalid request: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error analyzing session: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to analyze session: {str(e)}"
         )

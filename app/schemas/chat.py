@@ -276,6 +276,25 @@ class PromptInfo(BaseModel):
     description: Optional[str] = Field(None, description="Prompt description")
 
 
+class SessionAnalysisResponse(BaseModel):
+    """Simple session analysis with summary and comprehension level"""
+    session_id: UUID = Field(..., description="Session ID")
+    summary: str = Field(..., description="Session summary paragraph")
+    comprehension_level: str = Field(..., description="Comprehension level: LOW, MEDIUM, HIGH")
+    analyzed_at: datetime = Field(..., description="When the analysis was performed")
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "summary": "Student membahas tentang neural network, backpropagation, dan activation functions. Menunjukkan pemahaman yang baik tentang konsep dasar.",
+                "comprehension_level": "MEDIUM",
+                "analyzed_at": "2025-11-09T21:00:00Z"
+            }
+        }
+
+
 class ConfigResponse(BaseModel):
     """Configuration response with available models and active prompt"""
     models: List[ModelInfo] = Field(..., description="List of available models")
