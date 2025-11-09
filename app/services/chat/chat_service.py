@@ -248,12 +248,9 @@ class ChatService:
         """
         Build conversation context from session messages.
 
-        Concatenates 5 prompt sources in order:
-        1. prompt_general (from ChatConfig singleton)
-        2. task (from User profile)
-        3. persona (from User profile)
-        4. mission_objective (from User profile)
-        5. prompt content (from Prompt table)
+        Concatenates prompt sources with structured format:
+        - Student Learning Profile section (task, persona, mission_objective)
+        - Teacher's Specific Prompt section (prompt_general + prompt from Prompt table)
 
         Args:
             session: Chat session
@@ -261,33 +258,33 @@ class ChatService:
         """
         context = []
 
-        # Build concatenated system prompt from 5 sources
-        prompt_parts = []
+        # Build concatenated system prompt with structured format
+        prompt_sections = []
 
-        # 1. Get prompt_general from ChatSession
+        # SECTION 1: General Prompt (top priority)
         if session.prompt_general:
-            prompt_parts.append(session.prompt_general)
+            prompt_sections.append(f"# General Prompt\n{session.prompt_general}")
 
-        # 2. Get task from ChatSession
+        # SECTION 2: Student Learning Profile
+        student_profile = []
         if session.task:
-            prompt_parts.append(session.task)
-
-        # 3. Get persona from ChatSession
+            student_profile.append(f"# Task\n{session.task}")
         if session.persona:
-            prompt_parts.append(session.persona)
-
-        # 4. Get mission_objective from ChatSession
+            student_profile.append(f"# Persona\n{session.persona}")
         if session.mission_objective:
-            prompt_parts.append(session.mission_objective)
+            student_profile.append(f"# Mission Objective\n{session.mission_objective}")
 
-        # 5. Get prompt content from Prompt table
+        if student_profile:
+            prompt_sections.append("Student Learning Profile\n" + "\n\n".join(student_profile))
+
+        # SECTION 3: Specific Prompt (from Prompt table - lowest priority/specific)
         if session.prompt_id:
             prompt = self.db.query(Prompt).filter(Prompt.id == session.prompt_id).first()
             if prompt:
-                prompt_parts.append(prompt.content)
+                prompt_sections.append(f"# Specific Prompt\n{prompt.content}")
 
-        # Concatenate all parts with double newline separator
-        system_content = "\n\n".join(prompt_parts) if prompt_parts else ""
+        # Concatenate sections with double newline separator
+        system_content = "\n\n".join(prompt_sections) if prompt_sections else ""
 
         # Get RAG instruction setting from database if not explicitly provided
         if include_rag_instruction is None:
@@ -299,17 +296,8 @@ class ChatService:
                 logger.warning(f"Failed to load RAG config, using default include_rag_instruction=True: {e}")
                 include_rag_instruction = True
 
-        # Add RAG instruction if enabled (for tool-aware models)
-        if include_rag_instruction:
-            rag_instruction = (
-                "\n\n"
-                "IMPORTANT: You have access to a semantic_search tool to find relevant documents. "
-                "When a user asks questions about content in uploaded documents, "
-                "ALWAYS use the semantic_search tool to find relevant information first. "
-                "Pass the user's question as the 'query' parameter to search the documents. "
-                "Then provide an answer based on the search results."
-            )
-            system_content = system_content + rag_instruction if system_content else rag_instruction
+        # RAG instruction is now included in prompt_general (Teacher's Specific Prompt)
+        # No additional RAG instruction appended here
 
         # Log the complete concatenated system prompt
         if system_content:
