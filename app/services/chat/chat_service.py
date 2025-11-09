@@ -574,7 +574,7 @@ class ChatService:
         try:
             # Get analysis prompt from ChatConfig
             chat_config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
-            if not chat_config or not chat_config.analysis_prompt:
+            if not chat_config or not chat_config.prompt_analysis:
                 raise ValueError("Analysis prompt not configured in ChatConfig")
 
             # Build analysis context
@@ -585,7 +585,7 @@ class ChatService:
             analysis_context = [
                 {
                     "role": "system",
-                    "content": chat_config.analysis_prompt
+                    "content": chat_config.prompt_analysis
                 },
                 {
                     "role": "user",

@@ -1,4 +1,4 @@
-"""Add analysis_prompt to chat_config table
+"""Add prompt_analysis to chat_config table
 
 Revision ID: a1b2c3d4e5f6
 Revises: j5k6l7m8n9o0
@@ -17,10 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add analysis_prompt column to chat_config table
-    op.add_column('chat_config', sa.Column('analysis_prompt', sa.Text(), nullable=True))
+    # Add prompt_analysis column to chat_config table
+    op.add_column('chat_config', sa.Column('prompt_analysis', sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
-    # Remove analysis_prompt column from chat_config table
-    op.drop_column('chat_config', 'analysis_prompt')
+    # Remove prompt_analysis column from chat_config table
+    op.drop_column('chat_config', 'prompt_analysis')

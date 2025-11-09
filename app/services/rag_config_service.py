@@ -57,6 +57,7 @@ class ChatConfigService:
     def update_config(
         self,
         prompt_general: Optional[str] = None,
+        prompt_analysis: Optional[str] = None,
         default_top_k: Optional[int] = None,
         max_top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,
@@ -69,6 +70,7 @@ class ChatConfigService:
 
         Args:
             prompt_general: System-wide general prompt
+            prompt_analysis: Analysis prompt for evaluating student sessions
             default_top_k: Default number of search results
             max_top_k: Maximum number of search results
             similarity_threshold: Minimum similarity score (0-1)
@@ -84,6 +86,10 @@ class ChatConfigService:
         # Update prompt_general if provided
         if prompt_general is not None:
             config.prompt_general = prompt_general
+
+        # Update prompt_analysis if provided
+        if prompt_analysis is not None:
+            config.prompt_analysis = prompt_analysis
 
         # Update fields if provided
         if default_top_k is not None:

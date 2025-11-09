@@ -20,8 +20,8 @@ class ChatConfig(Base):
     # General system prompt (for all users/sessions)
     prompt_general = Column(Text, nullable=True)
 
-    # Analysis prompts (for session analysis)
-    analysis_prompt = Column(Text, nullable=True)
+    # Analysis prompt (for session analysis)
+    prompt_analysis = Column(Text, nullable=True)
 
     # Semantic search parameters
     default_top_k = Column(Integer, default=5, nullable=False)
@@ -46,7 +46,7 @@ class ChatConfig(Base):
         return {
             "id": self.id,
             "prompt_general": self.prompt_general,
-            "analysis_prompt": self.analysis_prompt,
+            "prompt_analysis": self.prompt_analysis,
             "default_top_k": self.default_top_k,
             "max_top_k": self.max_top_k,
             "similarity_threshold": self.similarity_threshold,
