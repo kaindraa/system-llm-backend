@@ -131,6 +131,7 @@ class ChatSessionResponse(BaseModel):
     id: UUID = Field(..., description="Session ID")
     user_id: UUID = Field(..., description="User ID")
     model_id: UUID = Field(..., description="Model ID")
+    model_name: Optional[str] = Field(None, description="Model display name")
     prompt_id: Optional[UUID] = Field(None, description="Prompt ID")
     title: Optional[str] = Field(None, description="Session title")
     status: str = Field(..., description="Session status")

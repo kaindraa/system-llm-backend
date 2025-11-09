@@ -555,7 +555,7 @@ class ChatService:
         Analyze a completed chat session.
 
         Generates summary and comprehension level assessment based on conversation history.
-        Saves results to session.analysis JSONB field.
+        Saves results to database columns: summary, comprehension_level (as string: "low"/"medium"/"high"), analyzed_at.
 
         Args:
             session_id: Chat session ID
@@ -608,32 +608,41 @@ class ChatService:
             analysis_data = json.loads(analysis_json)
 
             # Extract summary and comprehension_level from LLM response
-            summary = analysis_data.get("summary", "")
-            comprehension_level = analysis_data.get("comprehension_level", "").lower()
+            summary = analysis_data.get("summary", "").strip()
+            comprehension_level_raw = analysis_data.get("comprehension_level", "")
+
+            # Ensure lowercase
+            if isinstance(comprehension_level_raw, str):
+                comprehension_level_raw = comprehension_level_raw.strip().lower()
+            else:
+                comprehension_level_raw = str(comprehension_level_raw).strip().lower()
+
+            logger.info(f"[ANALYSIS] Extracted level: '{comprehension_level_raw}' (type: {type(comprehension_level_raw).__name__})")
 
             # Validate
-            if not summary or not comprehension_level:
+            if not summary or not comprehension_level_raw:
                 raise ValueError("Invalid analysis response from LLM")
 
-            if comprehension_level not in ["low", "medium", "high"]:
-                raise ValueError(f"Invalid comprehension level: {comprehension_level}")
+            if comprehension_level_raw not in ["low", "medium", "high"]:
+                raise ValueError(f"Invalid comprehension level: {comprehension_level_raw}")
 
             # Save to database columns
-            from app.models.chat_session import ComprehensionLevel
             session.summary = summary
-            session.comprehension_level = ComprehensionLevel(comprehension_level)
+            logger.info(f"[ANALYSIS] Saving to database with level: {comprehension_level_raw}")
+            # Store comprehension_level as lowercase string ("low", "medium", "high")
+            session.comprehension_level = comprehension_level_raw
             session.ended_at = datetime.utcnow()
             session.analyzed_at = datetime.utcnow()
 
             self.db.commit()
             self.db.refresh(session)
 
-            logger.info(f"[ANALYSIS] Session {session_id}: Analysis completed - Level: {comprehension_level}")
+            logger.info(f"[ANALYSIS] Session {session_id}: Analysis completed - Level: {comprehension_level_raw}")
 
             return {
                 "session_id": session.id,
                 "summary": summary,
-                "comprehension_level": comprehension_level.upper(),
+                "comprehension_level": comprehension_level_raw.upper(),
                 "analyzed_at": datetime.utcnow().isoformat()
             }
 

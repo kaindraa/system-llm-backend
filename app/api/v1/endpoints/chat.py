@@ -191,7 +191,16 @@ async def get_chat_session(
                 detail=f"Session {session_id} not found"
             )
 
-        return session
+        # Convert to dict and add model_name
+        session_dict = {
+            **session.__dict__,
+            "model_name": session.model.display_name if session.model else None
+        }
+
+        # Remove SQLAlchemy internal attributes
+        session_dict = {k: v for k, v in session_dict.items() if not k.startswith("_")}
+
+        return session_dict
 
     except HTTPException:
         raise
