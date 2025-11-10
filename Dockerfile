@@ -41,9 +41,6 @@ ENV PYTHONPATH=/app:$PYTHONPATH
 # Create required directories
 RUN mkdir -p /app/logs /app/credentials /app/storage/uploads
 
-# Copy GCS credentials file
-COPY credentials/system-llm-storage-key.json /app/credentials/system-llm-storage-key.json
-
 # Copy entrypoint script
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

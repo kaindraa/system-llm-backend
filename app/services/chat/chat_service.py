@@ -69,7 +69,7 @@ class ChatService:
             title=title or f"Chat with {model.display_name}",
             prompt_id=prompt_id,
             messages=[],
-            status=SessionStatus.ACTIVE,
+            status=SessionStatus.ACTIVE.value,  # Convert enum to string value
             total_messages=0,
             prompt_general=prompt_general,
             task=task,
@@ -115,7 +115,9 @@ class ChatService:
         query = self.db.query(ChatSession).filter(ChatSession.user_id == user_id)
 
         if status:
-            query = query.filter(ChatSession.status == status)
+            # Convert enum to string value for database comparison
+            status_value = status.value if isinstance(status, SessionStatus) else status
+            query = query.filter(ChatSession.status == status_value)
 
         sessions = (
             query
@@ -143,8 +145,11 @@ class ChatService:
             session.title = title
 
         if status is not None:
-            session.status = status
-            if status == SessionStatus.COMPLETED:
+            # Convert enum to string value for database storage
+            status_value = status.value if isinstance(status, SessionStatus) else status
+            session.status = status_value
+            # Mark session as ended if status changed to ANALYZED
+            if status_value == SessionStatus.ANALYZED.value:
                 session.ended_at = datetime.utcnow()
 
         self.db.commit()
@@ -177,7 +182,7 @@ class ChatService:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
-        if session.status != SessionStatus.ACTIVE:
+        if session.status != SessionStatus.ACTIVE.value:
             raise ValueError(f"Session {session_id} is not active")
 
         # Build conversation context to get system prompt
@@ -381,7 +386,7 @@ class ChatService:
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
-        if session.status != SessionStatus.ACTIVE:
+        if session.status != SessionStatus.ACTIVE.value:
             raise ValueError(f"Session {session_id} is not active")
 
         # Build conversation context to get system prompt

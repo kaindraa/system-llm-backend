@@ -135,7 +135,7 @@ async def get_user_chats(
             {
                 "id": session.id,
                 "title": session.title,
-                "status": session.status.value,
+                "status": session.status,  # status is already a string in DB
                 "total_messages": session.total_messages,
                 "started_at": session.started_at,
                 "ended_at": session.ended_at,
