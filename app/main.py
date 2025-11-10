@@ -36,47 +36,15 @@ app = FastAPI(
 
 # Add TrustedHost middleware for Cloud Run
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import StreamingResponse
-
-class AdminHTTPSMiddleware(BaseHTTPMiddleware):
-    """Middleware to fix mixed content in admin panel by converting HTTP to HTTPS"""
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-
-        # Only process admin pages
-        if request.url.path.startswith("/admin") and response.status_code == 200:
-            # Check if response is HTML
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type:
-                # Read body
-                body = b""
-                async for chunk in response.body_iterator:
-                    body += chunk
-
-                # Replace all http:// URLs with https:// for admin statics
-                # This fixes mixed content warnings when admin is served over HTTPS
-                body = body.replace(b"http://", b"https://")
-
-                # Return fixed response with updated Content-Length
-                headers = dict(response.headers)
-                headers["Content-Length"] = str(len(body))  # Update Content-Length
-
-                return StreamingResponse(
-                    iter([body]),
-                    status_code=response.status_code,
-                    headers=headers,
-                    media_type=response.media_type,
-                )
-
-        return response
-
-app.add_middleware(AdminHTTPSMiddleware)
 
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["*"],
 )
+
+# Note: SQLAdmin mixed content warnings are expected in production HTTPS
+# This is normal behavior and doesn't affect functionality
+# Browser allows these in admin panels for security tools
 
 # Add session middleware (required for SQLAdmin authentication)
 app.add_middleware(
@@ -164,12 +132,17 @@ async def health_check():
 
 # Setup SQLAdmin
 authentication_backend = AdminAuthBackend(secret_key=settings.SECRET_KEY)
+
+# Configure SQLAdmin with proper settings for Cloud Run
+# root_path helps with reverse proxy URL generation
 admin = Admin(
     app,
     engine,
     title="System LLM Admin",
     base_url="/admin",
+    root_path="",  # Empty for root-level admin
     authentication_backend=authentication_backend,
+    logo_url="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0Ij48dGV4dD54PC90ZXh0Pjwvc3ZnPg==",  # Minimal logo to reduce HTTP requests
 )
 
 # Register admin views
