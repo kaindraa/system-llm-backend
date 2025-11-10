@@ -34,6 +34,47 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Add TrustedHost middleware for Cloud Run
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import StreamingResponse
+
+class AdminHTTPSMiddleware(BaseHTTPMiddleware):
+    """Middleware to fix mixed content in admin panel by converting HTTP to HTTPS"""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        # Only process admin pages
+        if request.url.path.startswith("/admin") and response.status_code == 200:
+            # Check if response is HTML
+            content_type = response.headers.get("content-type", "")
+            if "text/html" in content_type:
+                # Read body
+                body = b""
+                async for chunk in response.body_iterator:
+                    body += chunk
+
+                # Replace all http:// URLs with https:// for admin statics
+                # This fixes mixed content warnings when admin is served over HTTPS
+                body = body.replace(b"http://", b"https://")
+
+                # Return fixed response
+                return StreamingResponse(
+                    iter([body]),
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
+
+        return response
+
+app.add_middleware(AdminHTTPSMiddleware)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"],
+)
+
 # Add session middleware (required for SQLAdmin authentication)
 app.add_middleware(
     SessionMiddleware,
