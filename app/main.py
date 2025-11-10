@@ -58,11 +58,14 @@ class AdminHTTPSMiddleware(BaseHTTPMiddleware):
                 # This fixes mixed content warnings when admin is served over HTTPS
                 body = body.replace(b"http://", b"https://")
 
-                # Return fixed response
+                # Return fixed response with updated Content-Length
+                headers = dict(response.headers)
+                headers["Content-Length"] = str(len(body))  # Update Content-Length
+
                 return StreamingResponse(
                     iter([body]),
                     status_code=response.status_code,
-                    headers=dict(response.headers),
+                    headers=headers,
                     media_type=response.media_type,
                 )
 
