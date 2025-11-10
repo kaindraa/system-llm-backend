@@ -52,10 +52,13 @@ Thumbs.db
 uploads/
 static/uploads/
 
-# Environment files (sensitive data)
+# Environment files (sensitive data) - BUT NOT credentials/ folder
 .env
 .env.local
 .env.*.local
+
+# NOTE: credentials/ folder IS copied to Docker image for GCS access
+# credentials/system-llm-storage-key.json is needed for production
 
 # CI/CD
 .github/

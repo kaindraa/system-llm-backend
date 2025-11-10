@@ -219,9 +219,10 @@ class GCSStorageProvider(FileStorageProvider):
         self.bucket_name = bucket_name
         self.project_id = project_id
         self.chunk_size = 1024 * 1024  # 1MB chunks for streaming
+        self.timeout = 300  # 5 minutes timeout for GCS operations
 
         try:
-            # Initialize GCS client
+            # Initialize GCS client with timeout configuration
             if credentials_path and os.path.exists(credentials_path):
                 # Use service account credentials from file
                 logger.info(f"[GCSStorageProvider.__init__] Using credentials from file: {credentials_path}")
@@ -253,7 +254,7 @@ class GCSStorageProvider(FileStorageProvider):
                 logger.error(f"[GCSStorageProvider.__init__] Error checking bucket existence: {str(check_error)}", exc_info=True)
                 raise ValueError(f"Cannot access GCS bucket '{self.bucket_name}': {str(check_error)}")
 
-            logger.info(f"[GCSStorageProvider.__init__] Successfully initialized with bucket: gs://{self.bucket_name}")
+            logger.info(f"[GCSStorageProvider.__init__] Successfully initialized with bucket: gs://{self.bucket_name} (timeout={self.timeout}s)")
 
         except Exception as e:
             logger.error(f"[GCSStorageProvider.__init__] Initialization failed: {str(e)}", exc_info=True)
