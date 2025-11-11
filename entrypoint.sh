@@ -25,14 +25,16 @@ if [ -n "$CLOUD_SQL_INSTANCES" ]; then
     PROXY_PID=$!
     echo "Cloud SQL Proxy started with PID: ${PROXY_PID}"
 
-    # Wait a moment for proxy to start
-    sleep 2
+    # Wait for proxy to be ready (increase timeout)
+    echo "Waiting for Cloud SQL Proxy to be ready..."
+    sleep 10
 
-    # Check if proxy started successfully
+    # Check if proxy process is still alive
     if ! kill -0 $PROXY_PID 2>/dev/null; then
-        echo "Error: Cloud SQL Proxy failed to start"
+        echo "Error: Cloud SQL Proxy process died"
         exit 1
     fi
+    echo "Cloud SQL Proxy is running (PID: $PROXY_PID)"
 else
     echo "Warning: CLOUD_SQL_INSTANCES not set - proxy will not start"
 fi

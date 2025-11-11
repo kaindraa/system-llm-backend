@@ -134,15 +134,12 @@ async def health_check():
 authentication_backend = AdminAuthBackend(secret_key=settings.SECRET_KEY)
 
 # Configure SQLAdmin with proper settings for Cloud Run
-# root_path helps with reverse proxy URL generation
 admin = Admin(
     app,
     engine,
     title="System LLM Admin",
     base_url="/admin",
-    root_path="",  # Empty for root-level admin
     authentication_backend=authentication_backend,
-    logo_url="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0Ij48dGV4dD54PC90ZXh0Pjwvc3ZnPg==",  # Minimal logo to reduce HTTP requests
 )
 
 # Register admin views
