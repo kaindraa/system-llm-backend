@@ -265,24 +265,51 @@ class GCSStorageProvider(FileStorageProvider):
         return f"uploads/{file_id}.pdf"
 
     def save(self, file_id: str, content: bytes) -> str:
-        """Save file to GCS"""
+        """Save file to GCS with verification"""
+        max_retries = 3
+        retry_delay = 1
+
         try:
             blob_name = self._get_blob_name(file_id)
             blob = self.bucket.blob(blob_name)
 
-            # Upload file to GCS
-            blob.upload_from_string(
-                content,
-                content_type='application/pdf'
-            )
+            # Upload file to GCS with retry logic
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"[GCSStorageProvider.save] Uploading file - file_id: {file_id}, blob_name: {blob_name}, size: {len(content)} bytes (attempt {attempt + 1}/{max_retries})")
 
-            logger.info(f"File saved successfully to GCS: {file_id} at gs://{self.bucket_name}/{blob_name}")
+                    blob.upload_from_string(
+                        content,
+                        content_type='application/pdf',
+                        timeout=self.timeout
+                    )
+                    logger.info(f"[GCSStorageProvider.save] Upload completed, verifying file exists...")
 
-            # Return GCS path for storage in database
-            return f"gs://{self.bucket_name}/{blob_name}"
+                    # VERIFICATION: Check if file actually exists in GCS
+                    if not blob.exists():
+                        raise Exception(f"File upload verification failed: file does not exist in GCS after upload")
+
+                    # Verify file size matches
+                    blob.reload()  # Refresh blob metadata from GCS
+                    if blob.size and blob.size != len(content):
+                        logger.warning(f"[GCSStorageProvider.save] Size mismatch: expected {len(content)}, got {blob.size}")
+
+                    logger.info(f"[GCSStorageProvider.save] ✅ File verified successfully - size: {blob.size} bytes")
+                    logger.info(f"File saved successfully to GCS: {file_id} at gs://{self.bucket_name}/{blob_name}")
+
+                    # Return GCS path for storage in database
+                    return f"gs://{self.bucket_name}/{blob_name}"
+
+                except Exception as attempt_error:
+                    if attempt < max_retries - 1:
+                        import time
+                        logger.warning(f"[GCSStorageProvider.save] Upload/verification failed (attempt {attempt + 1}/{max_retries}): {str(attempt_error)}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                    else:
+                        raise attempt_error
 
         except Exception as e:
-            logger.error(f"Error saving file to GCS {file_id}: {str(e)}")
+            logger.error(f"[GCSStorageProvider.save] ❌ Error saving file to GCS {file_id}: {str(e)}", exc_info=True)
             raise
 
     def get(self, file_id: str) -> bytes:
