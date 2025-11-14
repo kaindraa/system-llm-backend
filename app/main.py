@@ -42,9 +42,40 @@ app.add_middleware(
     allowed_hosts=["*"],
 )
 
-# Note: SQLAdmin mixed content warnings are expected in production HTTPS
-# This is normal behavior and doesn't affect functionality
-# Browser allows these in admin panels for security tools
+# Add middleware to fix mixed content in admin panel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+
+class AdminHTTPSFixMiddleware(BaseHTTPMiddleware):
+    """Fix mixed content by rewriting HTTP URLs to HTTPS in admin HTML"""
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        # Only process admin HTML responses
+        if request.url.path.startswith("/admin"):
+            content_type = response.headers.get("content-type", "")
+            if "text/html" in content_type and response.status_code == 200:
+                # Collect all chunks
+                body = b""
+                async for chunk in response.body_iterator:
+                    body += chunk
+
+                # Fix mixed content: replace http:// with https://
+                if b"http://" in body:
+                    body = body.replace(b"http://", b"https://")
+
+                # Return with correct headers
+                return Response(
+                    content=body,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
+
+        return response
+
+# Add middleware BEFORE session middleware
+app.add_middleware(AdminHTTPSFixMiddleware)
 
 # Add session middleware (required for SQLAdmin authentication)
 app.add_middleware(
