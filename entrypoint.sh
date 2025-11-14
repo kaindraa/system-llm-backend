@@ -41,8 +41,13 @@ fi
 
 echo "Starting FastAPI application..."
 
+# Export Uvicorn settings for proper proxy handling
+# This tells Uvicorn to trust X-Forwarded-* headers from Cloud Run
+export FORWARDED_ALLOW_IPS="*"
+
 # Start FastAPI with uvicorn
 # Use PORT env var (Cloud Run default 8080), fallback to 8000
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
-    --port ${PORT:-8000}
+    --port ${PORT:-8000} \
+    --proxy-headers
