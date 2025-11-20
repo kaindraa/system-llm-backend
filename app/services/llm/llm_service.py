@@ -5,6 +5,7 @@ from app.services.llm.base import BaseLLMProvider
 from app.services.llm.openai_provider import OpenAIProvider
 from app.services.llm.anthropic_provider import AnthropicProvider
 from app.services.llm.google_provider import GoogleProvider
+from app.services.llm.openrouter_provider import OpenRouterProvider
 from app.models.model import Model
 from app.core.logging import get_logger
 from app.core.config import settings
@@ -23,6 +24,7 @@ class LLMService:
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
         "google": GoogleProvider,
+        "openrouter": OpenRouterProvider,
         # Future providers can be added here:
         # "ollama": OllamaProvider,
         # "huggingface": HuggingFaceProvider,
@@ -102,6 +104,7 @@ class LLMService:
                 "openai": settings.OPENAI_API_KEY,
                 "anthropic": settings.ANTHROPIC_API_KEY,
                 "google": settings.GOOGLE_API_KEY,
+                "openrouter": settings.OPENROUTER_API_KEY,
             }
             config_key = api_key_config.get(provider_name)
             if config_key:

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-5-mini"
 
     # Cloud Storage Configuration
