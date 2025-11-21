@@ -360,6 +360,7 @@ async def send_message(
                 api_key = api_key_mapping.get(provider_name)
                 logger.info(f"Using {provider_name} provider with API key")
 
+            event_count = 0
             async for event in chat_service.send_message_stream(
                 session_id=session_id,
                 user_id=current_user.id,
@@ -367,14 +368,31 @@ async def send_message(
                 api_key=api_key,
                 use_rag=True  # Enable RAG by default - LLM decides if it needs to search
             ):
-                event_type = event["type"]
-                content = event["content"]
+                event_count += 1
+                event_type = event.get("type", "UNKNOWN")
+                content = event.get("content", {})
+
+                logger.info(f"[ENDPOINT] Event #{event_count} received from chat_service: type='{event_type}'")
+                logger.debug(f"[ENDPOINT] Event content: {str(content)[:100]}...")
 
                 if event_type == "user_message":
                     yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
+                elif event_type == "refine_prompt":
+                    # Refine prompt tool is being called (TAHAP 1 - LLM decide)
+                    logger.info(f"[SSE] Forwarding refine_prompt event: {content}")
+                    yield f"event: refine_prompt\ndata: {json.dumps(content)}\n\n"
+                elif event_type == "refine_prompt_result":
+                    # Refine prompt tool result (TAHAP 2 - tool executed)
+                    logger.info(f"[SSE] Forwarding refine_prompt_result event: {content}")
+                    yield f"event: refine_prompt_result\ndata: {json.dumps(content)}\n\n"
                 elif event_type == "rag_search":
                     # RAG tool call event
+                    logger.info(f"[SSE] Forwarding rag_search event: {content}")
                     yield f"event: rag_search\ndata: {json.dumps(content)}\n\n"
+                elif event_type == "rag_search_result":
+                    # RAG tool result event
+                    logger.info(f"[SSE] Forwarding rag_search_result event: {content}")
+                    yield f"event: rag_search_result\ndata: {json.dumps(content)}\n\n"
                 elif event_type == "chunk":
                     # Text chunk from LLM response
                     yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"

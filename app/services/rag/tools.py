@@ -21,6 +21,11 @@ class SemanticSearchInput(BaseModel):
     top_k: int = Field(default=5, ge=1, le=100, description="Number of results to return (default from config, max: from config)")
 
 
+class RefinePromptInput(BaseModel):
+    """Input schema for refine prompt tool."""
+    original_prompt: str = Field(..., description="The original student question that needs refinement/clarification")
+
+
 class RAGToolFactory:
     """Factory for creating Langchain RAG tools."""
 
@@ -34,10 +39,18 @@ class RAGToolFactory:
         Create a Langchain tool for semantic search.
 
         The LLM can call this tool to search for relevant documents.
+        Tool description is hardcoded (TAHAP 1) - no dynamic instruction needed since
+        this tool doesn't call LLM in TAHAP 2 (just queries pgvector database).
 
         Returns:
             Langchain Tool object
         """
+        # TAHAP 1: Tool description (hardcoded - used by LLM to decide whether to call this tool)
+        semantic_search_description = (
+            "Semantically search the knowledge base to find documents and information "
+            "relevant to a question. Use this when you need to retrieve specific information "
+            "from the available documents to answer a user's question."
+        )
 
         def semantic_search_impl(query: str, top_k: int = None) -> Dict[str, Any]:
             """
@@ -139,32 +152,202 @@ class RAGToolFactory:
 
             return semantic_search_impl(query=query, top_k=top_k)
 
-        # Create tool with explicit schema for better LLM understanding
+        # Create tool with TAHAP 1 description (hardcoded, no TAHAP 2 instruction needed)
         tool = Tool(
             name="semantic_search",
             func=tool_wrapper,
             args_schema=SemanticSearchInput,
-            description="""Semantically search documents for information relevant to a question.
+            description=semantic_search_description  # TAHAP 1 - used by LLM to decide
+        )
 
-Use this tool whenever you need to find specific information from the uploaded documents.
-Pass the user's question or search terms as the query parameter.
+        return tool
 
-IMPORTANT: Always provide a clear, specific search query based on what the user is asking about.
+    def create_refine_prompt_tool(self) -> Tool:
+        """
+        Create a Langchain tool for refining student prompts.
 
-The tool uses configurable parameters from the RAG system:
-- Default results (top_k) and max results are controlled by RAG settings
-- Similarity threshold is automatically adjusted from system settings
+        The LLM can call this tool to refine/clarify ambiguous student questions.
+        - TAHAP 1 (Tool Definition): Description is hardcoded below for consistency
+        - TAHAP 2 (Tool Execution): Uses prompt_refine instruction from ChatConfig
 
-Parameters:
-    query (REQUIRED string): The search query or question. Examples: "What is NAT?", "explain OSPF", "speech processing"
-    top_k (optional integer): Number of document chunks to return (uses database config if not specified)
+        Returns:
+            Langchain Tool object
+        """
+        # TAHAP 1: Tool description (hardcoded - used by LLM to decide whether to call this tool)
+        refine_prompt_description = (
+            "Refine and clarify an ambiguous or unclear student question.\n\n"
+            "Use this tool when the student's question is vague, incomplete, or could be "
+            "interpreted multiple ways. This will rewrite the question to be more specific "
+            "and clearer for semantic search.\n\n"
+            "IMPORTANT: Only use this tool if you think the question needs clarification before "
+            "searching documents. If the question is already clear and specific, skip this tool "
+            "and proceed directly to semantic_search."
+        )
 
-Returns a dictionary with:
-    - results: List of matching document chunks with content, filename, page number
-    - sources: Document files that contained matches
-    - count: Number of results returned
-    - error: Error message if something failed
-"""
+        # TAHAP 2: Get refine prompt instruction from ChatConfig (used during LLM execution)
+        from app.models.chat_config import ChatConfig
+        config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
+        refine_prompt_template = config.prompt_refine if config and config.prompt_refine else (
+            "Refine the student's question to be more specific and clear for better search results."
+        )
+
+        def refine_prompt_impl(original_prompt: str) -> Dict[str, Any]:
+            """
+            Refine a student's question using LLM.
+
+            This tool helps clarify ambiguous or vague student questions into more
+            specific and searchable questions before performing RAG search.
+
+            Args:
+                original_prompt: The original student question/prompt
+
+            Returns:
+                Dictionary containing:
+                - original: Original prompt provided
+                - refined: Refined/clarified version of the prompt
+                - success: Whether refinement was successful
+
+            Example:
+                Input: "gimana loop?"
+                Output: "Jelaskan perbedaan antara for loop dan while loop dalam Python"
+            """
+            try:
+                from app.services.llm.llm_service import LLMService
+
+                # ========== STEP 1: Validate Input ==========
+                logger.info("="*80)
+                logger.info("[REFINE_PROMPT] STEP 1: Validating input")
+                if not isinstance(original_prompt, str) or not original_prompt.strip():
+                    logger.error(f"[REFINE_PROMPT] ❌ Invalid prompt: empty or non-string (got: {repr(original_prompt)})")
+                    raise ValueError("Prompt must be a non-empty string")
+                logger.info(f"[REFINE_PROMPT] ✅ Input valid - length: {len(original_prompt)} characters")
+                logger.debug(f"[REFINE_PROMPT] Original prompt: '{original_prompt}'")
+
+                # ========== STEP 2: Setup LLM Service ==========
+                logger.info("[REFINE_PROMPT] STEP 2: Initializing LLM service")
+                llm_service = LLMService(db=self.db)
+                logger.info("[REFINE_PROMPT] ✅ LLM service initialized")
+
+                # ========== STEP 3: Prepare System & User Messages ==========
+                logger.info("[REFINE_PROMPT] STEP 3: Preparing messages for LLM")
+                logger.debug(f"[REFINE_PROMPT] System prompt length: {len(refine_prompt_template)} characters")
+                logger.debug(f"[REFINE_PROMPT] System prompt content:\n{refine_prompt_template[:200]}...")
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": refine_prompt_template
+                    },
+                    {
+                        "role": "user",
+                        "content": original_prompt
+                    }
+                ]
+                logger.info("[REFINE_PROMPT] ✅ Messages prepared (1 system + 1 user message)")
+
+                # ========== STEP 4: Call LLM to Refine Prompt ==========
+                logger.info("[REFINE_PROMPT] STEP 4: Calling LLM to refine prompt")
+                logger.info("[REFINE_PROMPT] Model: gpt-4.1-nano (fast & efficient)")
+
+                import asyncio
+                logger.info("[REFINE_PROMPT] 🔄 Sending request to LLM...")
+
+                try:
+                    # Try to use existing event loop if running, otherwise create new one
+                    try:
+                        loop = asyncio.get_running_loop()
+                        logger.debug("[REFINE_PROMPT] Using existing event loop")
+                        # If there's already a running loop, we need to run in executor
+                        import concurrent.futures
+                        import threading
+
+                        def run_async():
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            try:
+                                return new_loop.run_until_complete(
+                                    llm_service.generate_async(
+                                        model_id="gpt-4.1-nano",
+                                        messages=messages
+                                    )
+                                )
+                            finally:
+                                new_loop.close()
+
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            refined_prompt = executor.submit(run_async).result()
+                    except RuntimeError:
+                        # No event loop running, create one
+                        logger.debug("[REFINE_PROMPT] Creating new event loop")
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            refined_prompt = loop.run_until_complete(
+                                llm_service.generate_async(
+                                    model_id="gpt-4.1-nano",
+                                    messages=messages
+                                )
+                            )
+                        finally:
+                            loop.close()
+
+                    logger.info("[REFINE_PROMPT] ✅ LLM response received successfully")
+                except Exception as e:
+                    logger.error(f"[REFINE_PROMPT] ❌ LLM call failed: {str(e)}")
+                    raise
+
+                # ========== STEP 5: Return Result ==========
+                logger.info("[REFINE_PROMPT] STEP 5: Processing result")
+                logger.debug(f"[REFINE_PROMPT] Refined prompt: '{refined_prompt}'")
+                logger.info(f"[REFINE_PROMPT] ✅ Refinement successful")
+                logger.info(f"[REFINE_PROMPT] Original length: {len(original_prompt)} → Refined length: {len(refined_prompt)}")
+                logger.info("="*80)
+
+                return {
+                    "original": original_prompt,
+                    "refined": refined_prompt,
+                    "success": True
+                }
+
+            except Exception as e:
+                logger.error("="*80)
+                logger.error(f"[REFINE_PROMPT] ❌ ERROR during execution")
+                logger.error(f"[REFINE_PROMPT] Error type: {type(e).__name__}")
+                logger.error(f"[REFINE_PROMPT] Error message: {str(e)}")
+                logger.error(f"[REFINE_PROMPT] Original prompt: '{original_prompt}'", exc_info=True)
+                logger.error("="*80)
+
+                return {
+                    "original": original_prompt,
+                    "refined": original_prompt,  # Return original if refinement fails
+                    "success": False,
+                    "error": str(e)
+                }
+
+        # Create wrapper to handle tool call format
+        def tool_wrapper(**kwargs) -> Dict[str, Any]:
+            """Wrapper to handle OpenAI tool call format."""
+            logger.info("[REFINE_PROMPT_WRAPPER] Tool called by LLM")
+            logger.debug(f"[REFINE_PROMPT_WRAPPER] Raw kwargs: {kwargs}")
+
+            # Extract original_prompt from either 'original_prompt' or '__arg1' (OpenAI format)
+            original_prompt = kwargs.get("original_prompt") or kwargs.get("__arg1")
+
+            if not original_prompt:
+                logger.error("[REFINE_PROMPT_WRAPPER] ❌ original_prompt parameter missing")
+                raise ValueError("original_prompt parameter is required")
+
+            logger.info(f"[REFINE_PROMPT_WRAPPER] ✅ Extracted prompt (length: {len(original_prompt)} chars)")
+            logger.debug(f"[REFINE_PROMPT_WRAPPER] Forwarding to refine_prompt_impl...")
+
+            return refine_prompt_impl(original_prompt=original_prompt)
+
+        # Create tool with explicit schema
+        tool = Tool(
+            name="refine_prompt",
+            func=tool_wrapper,
+            args_schema=RefinePromptInput,
+            description=refine_prompt_description  # TAHAP 1 - used by LLM to decide
         )
 
         return tool
@@ -177,10 +360,11 @@ Returns a dictionary with:
             List of Langchain Tool objects
         """
         tools = [
+            self.create_refine_prompt_tool(),
             self.create_semantic_search_tool(),
         ]
 
-        logger.info(f"Created {len(tools)} RAG tools")
+        logger.info(f"Created {len(tools)} RAG tools: {[t.name for t in tools]}")
         return tools
 
 

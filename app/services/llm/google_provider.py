@@ -191,15 +191,46 @@ class GoogleProvider(BaseLLMProvider):
 
                     logger.info(f"LLM called tool: {tool_name} with input: {tool_input}")
 
-                    # Yield tool call event
-                    yield {
-                        "type": "tool_call",
-                        "content": {
-                            "tool_name": tool_name,
-                            "tool_input": tool_input,
-                            "tool_id": tool_id
+                    # Yield tool call event with specific types for known tools
+                    if tool_name == "refine_prompt":
+                        # Extract original_prompt from tool_input (handle different possible formats)
+                        if isinstance(tool_input, dict):
+                            original_prompt = tool_input.get("original_prompt", "")
+                        else:
+                            original_prompt = str(tool_input) if tool_input else ""
+
+                        logger.info(f"[REFINE_PROMPT_EVENT] Yielding refine_prompt event with prompt: '{original_prompt}'")
+                        yield {
+                            "type": "refine_prompt",
+                            "content": {
+                                "original_prompt": original_prompt,
+                                "status": "refining"
+                            }
                         }
-                    }
+                    elif tool_name == "semantic_search":
+                        # Extract query from tool_input (handle different possible formats)
+                        if isinstance(tool_input, dict):
+                            query = tool_input.get("query", "")
+                        else:
+                            query = str(tool_input) if tool_input else ""
+
+                        yield {
+                            "type": "rag_search",
+                            "content": {
+                                "query": query,
+                                "status": "searching"
+                            }
+                        }
+                    else:
+                        # Default for other tools
+                        yield {
+                            "type": "tool_call",
+                            "content": {
+                                "tool_name": tool_name,
+                                "tool_input": tool_input,
+                                "tool_id": tool_id
+                            }
+                        }
 
                     # Find and execute the tool
                     tool_to_run = None
@@ -216,15 +247,39 @@ class GoogleProvider(BaseLLMProvider):
                             tool_result = tool_to_run.func(**tool_input)
                             logger.info(f"Tool {tool_name} executed successfully")
 
-                            # Yield tool result event
-                            yield {
-                                "type": "tool_result",
-                                "content": {
-                                    "tool_name": tool_name,
-                                    "tool_id": tool_id,
-                                    "result": tool_result
+                            # Yield tool result event with different types for different tools
+                            # This allows frontend to handle different tool results differently
+                            if tool_name == "refine_prompt":
+                                logger.info(f"[GOOGLE_PROVIDER] Yielding refine_prompt_result event")
+                                yield {
+                                    "type": "refine_prompt_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
                                 }
-                            }
+                            elif tool_name == "semantic_search":
+                                logger.info(f"[GOOGLE_PROVIDER] Yielding rag_search_result event")
+                                yield {
+                                    "type": "rag_search_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
+                            else:
+                                # Default for other tools
+                                logger.info(f"[GOOGLE_PROVIDER] Yielding tool_result event for {tool_name}")
+                                yield {
+                                    "type": "tool_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
 
                             # Format tool result for LLM (JSON for structured data)
                             if isinstance(tool_result, dict):

@@ -20,6 +20,9 @@ class ChatConfig(Base):
     # General system prompt (for all users/sessions)
     prompt_general = Column(Text, nullable=True)
 
+    # Refine prompt (for LLM to refine/clarify student questions before RAG)
+    prompt_refine = Column(Text, nullable=True)
+
     # Analysis prompt (for session analysis)
     prompt_analysis = Column(Text, nullable=True)
 
@@ -46,6 +49,7 @@ class ChatConfig(Base):
         return {
             "id": self.id,
             "prompt_general": self.prompt_general,
+            "prompt_refine": self.prompt_refine,
             "prompt_analysis": self.prompt_analysis,
             "default_top_k": self.default_top_k,
             "max_top_k": self.max_top_k,

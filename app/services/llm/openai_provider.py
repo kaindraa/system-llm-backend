@@ -246,6 +246,7 @@ class OpenAIProvider(BaseLLMProvider):
                     logger.info(f"LLM called tool: {tool_name} with input: {tool_input}")
 
                     # Yield tool call event
+                    logger.info(f"[OPENAI_PROVIDER] Yielding tool_call event for tool: {tool_name}")
                     yield {
                         "type": "tool_call",
                         "content": {
@@ -270,15 +271,39 @@ class OpenAIProvider(BaseLLMProvider):
                             tool_result = tool_to_run.func(**tool_input)
                             logger.info(f"Tool {tool_name} executed successfully")
 
-                            # Yield tool result event
-                            yield {
-                                "type": "tool_result",
-                                "content": {
-                                    "tool_name": tool_name,
-                                    "tool_id": tool_id,
-                                    "result": tool_result
+                            # Yield tool result event with different types for different tools
+                            # This allows frontend to handle different tool results differently
+                            if tool_name == "refine_prompt":
+                                logger.info(f"[OPENAI_PROVIDER] Yielding refine_prompt_result event")
+                                yield {
+                                    "type": "refine_prompt_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
                                 }
-                            }
+                            elif tool_name == "semantic_search":
+                                logger.info(f"[OPENAI_PROVIDER] Yielding rag_search_result event")
+                                yield {
+                                    "type": "rag_search_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
+                            else:
+                                # Default for other tools
+                                logger.info(f"[OPENAI_PROVIDER] Yielding tool_result event for {tool_name}")
+                                yield {
+                                    "type": "tool_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
 
                             # Format tool result for LLM (JSON for structured data)
                             if isinstance(tool_result, dict):
