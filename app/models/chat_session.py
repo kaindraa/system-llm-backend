@@ -30,8 +30,18 @@ class ChatSession(Base):
     model_id = Column(UUID(as_uuid=True), ForeignKey("model.id"), nullable=False, index=True)
     title = Column(String(255))
 
-    # Messages stored as JSONB array
-    # Format: [{"role": "user|assistant|system", "content": "...", "created_at": "...", "sources": [...]}]
+    # Messages stored as JSONB arrays (three formats)
+
+    # INTERACTION_MESSAGES: Simple format for display (100% OpenAI standard)
+    # Format: [{"role": "system|user|assistant", "content": "..."}]
+    interaction_messages = Column(JSONB, nullable=False, default=list)
+
+    # REAL_MESSAGES: Exact LLM context with tool calling (Langchain format)
+    # Format: [{"role": "system|user|assistant|tool", "content": "...", "tool_calls": [...], "sources": [...]}]
+    real_messages = Column(JSONB, nullable=False, default=list)
+
+    # Legacy: Keep old messages column for backward compatibility
+    # TODO: Deprecate after migration complete
     messages = Column(JSONB, nullable=False, default=list)
 
     # Store as String to match database (lowercase values: 'active', 'analyzed')

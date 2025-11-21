@@ -39,22 +39,20 @@ class ChatMessageCreate(BaseModel):
 
 
 class ChatMessageResponse(BaseModel):
-    """Schema for a chat message in responses"""
+    """Schema for a chat message in responses (legacy format)"""
     role: str = Field(..., description="Role of the message sender")
     content: str = Field(..., description="Content of the message")
-    created_at: datetime = Field(..., description="When the message was created")
+    created_at: Optional[datetime] = Field(None, description="When the message was created (legacy)")
     sources: Optional[List[Dict[str, Any]]] = Field(
         default=None,
-        description="Sources from RAG (if applicable)"
+        description="Sources from RAG (if applicable) - legacy"
     )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "role": "assistant",
-                "content": "Machine learning is a subset of AI...",
-                "created_at": "2025-01-25T10:30:00Z",
-                "sources": None
+                "content": "Machine learning is a subset of AI..."
             }
         }
 
@@ -167,7 +165,15 @@ class ChatSessionDetailResponse(ChatSessionResponse):
     """Schema for detailed chat session with messages"""
     messages: List[ChatMessageResponse] = Field(
         ...,
-        description="All messages in the session"
+        description="All messages in the session (legacy, use interaction_messages)"
+    )
+    interaction_messages: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Simple format messages (100% OpenAI standard: system, user, assistant only)"
+    )
+    real_messages: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Full format messages with tool calls (Langchain format including tool role and chunks)"
     )
 
     class Config:

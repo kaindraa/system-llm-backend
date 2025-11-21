@@ -189,20 +189,18 @@ class ChatService:
         conversation_context = self._build_conversation_context(session)
 
         # Extract system message from context (first message with role: "system")
+        # MINIMAL format - ONLY role + content for interaction_messages
         system_message = None
         if conversation_context and conversation_context[0].get("role") == "system":
             system_message = {
                 "role": "system",
-                "content": conversation_context[0]["content"],
-                "created_at": datetime.utcnow().isoformat(),
-                "sources": None
+                "content": conversation_context[0]["content"]
             }
 
+        # MINIMAL format - ONLY role + content for interaction_messages
         user_message = {
             "role": "user",
-            "content": message_content,
-            "created_at": datetime.utcnow().isoformat(),
-            "sources": None
+            "content": message_content
         }
 
         conversation_context.append({
@@ -222,22 +220,32 @@ class ChatService:
             logger.error(f"LLM error in session {session_id}: {str(e)}")
             raise
 
+        # MINIMAL format - ONLY role + content for interaction_messages
         assistant_message = {
             "role": "assistant",
-            "content": assistant_content,
-            "created_at": datetime.utcnow().isoformat(),
-            "sources": None
+            "content": assistant_content
         }
 
-        # Add system message only if it's the first message (not already in session)
+        # Save to BOTH interaction_messages (minimal format) and legacy messages column
+
+        # INTERACTION_MESSAGES (minimal: ONLY role + content)
+        interaction_to_save = []
+        if system_message and len(session.interaction_messages) == 0:
+            interaction_to_save.append(system_message)
+        interaction_to_save.append(user_message)
+        interaction_to_save.append(assistant_message)
+        session.interaction_messages.extend(interaction_to_save)
+
+        # LEGACY messages column (for backward compatibility)
         if system_message and len(session.messages) == 0:
             session.messages.append(system_message)
-
         session.messages.append(user_message)
         session.messages.append(assistant_message)
-        session.total_messages = len(session.messages)
+
+        session.total_messages = len(session.interaction_messages)
 
         from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(session, "interaction_messages")
         flag_modified(session, "messages")
 
         self.db.commit()
@@ -397,17 +405,13 @@ class ChatService:
         if conversation_context and conversation_context[0].get("role") == "system":
             system_message = {
                 "role": "system",
-                "content": conversation_context[0]["content"],
-                "created_at": datetime.utcnow().isoformat(),
-                "sources": None
+                "content": conversation_context[0]["content"]
             }
 
-        # Create user message
+        # Create user message (MINIMAL format - ONLY role + content for interaction_messages)
         user_message = {
             "role": "user",
-            "content": message_content,
-            "created_at": datetime.utcnow().isoformat(),
-            "sources": None
+            "content": message_content
         }
 
         # Yield user message first
@@ -426,6 +430,26 @@ class ChatService:
         # Initialize variables
         full_content = ""
         sources_list = []
+        real_messages_list = []  # Track for real_messages column (Option A: User original)
+        tool_messages = []  # Track tool calls and results for real_messages
+
+        # Build real_messages (Option A: User message ORIGINAL)
+        # Add system message to real_messages only if first message
+        if system_message and len(session.interaction_messages) == 0:
+            real_messages_list.append({
+                "role": "system",
+                "content": system_message["content"],
+                "created_at": datetime.utcnow().isoformat()
+            })
+            logger.debug(f"[REAL_MESSAGES] Added system message")
+
+        # Add user message to real_messages (ORIGINAL - not refined)
+        real_messages_list.append({
+            "role": "user",
+            "content": message_content,  # ORIGINAL user input
+            "created_at": datetime.utcnow().isoformat()
+        })
+        logger.debug(f"[REAL_MESSAGES] Added user message (original): {message_content[:50]}...")
 
         try:
             if use_rag:
@@ -548,6 +572,31 @@ class ChatService:
                                 }
                             }
 
+                            # Add to real_messages (Option A)
+                            # First add the tool_call message
+                            if not any(msg.get("role") == "assistant" and msg.get("tool_calls") for msg in real_messages_list):
+                                # Add assistant message with tool_calls if not already there
+                                real_messages_list.append({
+                                    "role": "assistant",
+                                    "content": "",
+                                    "created_at": datetime.utcnow().isoformat(),
+                                    "tool_calls": [{"name": tool_name, "args": {"original_prompt": original}}]
+                                })
+
+                            # Then add tool message with result
+                            import json
+                            real_messages_list.append({
+                                "role": "tool",
+                                "content": json.dumps({
+                                    "original": original,
+                                    "refined": refined,
+                                    "success": success
+                                }, ensure_ascii=False),
+                                "created_at": datetime.utcnow().isoformat(),
+                                "tool_call_id": f"tool_call_{tool_name}"
+                            })
+                            logger.debug(f"[REAL_MESSAGES] Added tool message for {tool_name}")
+
                         logger.info(f"[CHAT_SERVICE] 📤 YIELDING refine_prompt_result event")
                         yield event_to_yield
 
@@ -570,6 +619,40 @@ class ChatService:
                             if isinstance(result, dict):
                                 tool_sources = result.get("sources", [])
                                 sources_list.extend(tool_sources)
+
+                                # Add to real_messages (Option A) - CHUNKS ARE HERE!
+                                import json
+
+                                # First add the tool_call message for semantic_search
+                                search_query = result.get("query", "")
+                                real_messages_list.append({
+                                    "role": "assistant",
+                                    "content": "",
+                                    "created_at": datetime.utcnow().isoformat(),
+                                    "tool_calls": [{"name": tool_name, "args": {"query": search_query}}]
+                                })
+                                logger.debug(f"[REAL_MESSAGES] Added tool_call for {tool_name}")
+
+                                # Prepare chunks data - normalize structure
+                                # Provider might return "results" or "chunks" field, standardize to "chunks"
+                                chunks = result.get("chunks") or result.get("results", [])
+
+                                # Create standardized result for storage
+                                standardized_result = {
+                                    "query": result.get("query", ""),
+                                    "chunks": chunks,
+                                    "sources": result.get("sources", []),
+                                    "count": result.get("count", len(chunks))
+                                }
+
+                                # Then add tool message with chunks result - THIS IS WHERE CHUNKS ARE PRESERVED!
+                                real_messages_list.append({
+                                    "role": "tool",
+                                    "content": json.dumps(standardized_result, ensure_ascii=False, indent=2),  # FULL result dengan chunks
+                                    "created_at": datetime.utcnow().isoformat(),
+                                    "tool_call_id": f"tool_call_{tool_name}"
+                                })
+                                logger.info(f"[REAL_MESSAGES] Added ToolMessage with {results_count} chunks (CHUNKS PRESERVED HERE!)")
 
                                 event_to_yield = {
                                     "type": "rag_search",
@@ -623,32 +706,68 @@ class ChatService:
                     unique_sources.append(source)
                     seen.add(key)
 
-        # Create assistant message with full content and sources
+        # Create assistant message (MINIMAL format - ONLY role + content for interaction_messages)
         assistant_message = {
+            "role": "assistant",
+            "content": full_content
+        }
+
+        # Build real_messages: Add final assistant message with sources
+        real_messages_list.append({
             "role": "assistant",
             "content": full_content,
             "created_at": datetime.utcnow().isoformat(),
             "sources": unique_sources if unique_sources else None
-        }
+        })
+        logger.debug(f"[REAL_MESSAGES] Added final assistant message")
 
-        # Save messages to database
-        # Add system message only if it's the first message (not already in session)
+        # Save messages to database (populate BOTH columns)
+        # NOTE:
+        # - interaction_messages: Simple format (system, user, assistant) - for display
+        # - real_messages: Full format (with tool messages for Option A) - for exact replay
+        # - messages: Legacy column (for backward compatibility)
+
+        # INTERACTION_MESSAGES (Simple format for display)
+        interaction_messages_to_save = []
+
+        # Add system message only if it's the first message
+        if system_message and len(session.interaction_messages) == 0:
+            interaction_messages_to_save.append(system_message)
+
+        interaction_messages_to_save.append(user_message)
+        interaction_messages_to_save.append(assistant_message)
+
+        # Append to interaction_messages
+        session.interaction_messages.extend(interaction_messages_to_save)
+        logger.info(f"[INTERACTION_MESSAGES] Saved {len(interaction_messages_to_save)} messages")
+
+        # REAL_MESSAGES (Full format with tools for Option A)
+        session.real_messages.extend(real_messages_list)
+        logger.info(f"[REAL_MESSAGES] Saved {len(real_messages_list)} messages (chunks preserved in ToolMessages)")
+
+        # LEGACY: Keep messages column for backward compatibility
         if system_message and len(session.messages) == 0:
             session.messages.append(system_message)
 
         session.messages.append(user_message)
         session.messages.append(assistant_message)
-        session.total_messages = len(session.messages)
+
+        # Update total messages and flag modified
+        session.total_messages = len(session.interaction_messages)
 
         from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(session, "interaction_messages")
+        flag_modified(session, "real_messages")
         flag_modified(session, "messages")
 
         self.db.commit()
         self.db.refresh(session)
 
         logger.info(
-            f"Session {session_id}: Streaming completed (total: {len(session.messages)}, "
-            f"sources: {len(unique_sources)})"
+            f"Session {session_id}: Streaming completed"
+            f" | interaction_messages: {len(session.interaction_messages)}"
+            f" | real_messages: {len(session.real_messages)}"
+            f" | sources: {len(unique_sources)}"
         )
 
         # Yield done signal with assistant message
