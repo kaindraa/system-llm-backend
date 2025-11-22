@@ -190,31 +190,42 @@ class RAGSearchEvent(BaseModel):
 
 
 class RAGSettingsResponse(BaseModel):
-    """RAG system settings from database."""
+    """Complete RAG system settings from database - returns ALL columns."""
+    # Metadata
     id: int = Field(..., description="Config ID (always 1 - singleton)")
-    prompt_general: str = Field(..., description="General system prompt prepended to all conversations")
+    updated_at: Optional[str] = Field(None, description="ISO timestamp of last update")
+
+    # System Prompts
+    prompt_general: Optional[str] = Field(None, description="General system prompt prepended to all conversations")
     prompt_analysis: Optional[str] = Field(None, description="Analysis prompt for evaluating student learning sessions")
+    prompt_refine: Optional[str] = Field(None, description="Refine prompt for improving user queries")
+
+    # Search Parameters
     default_top_k: int = Field(..., description="Default number of search results", ge=1, le=100)
     max_top_k: int = Field(..., description="Maximum number of search results", ge=1, le=100)
     similarity_threshold: float = Field(..., description="Minimum similarity score (0-1)", ge=0, le=1)
+
+    # Tool Calling Parameters
     tool_calling_max_iterations: int = Field(..., description="Max tool calling iterations", ge=1, le=100)
     tool_calling_enabled: bool = Field(..., description="Enable/disable tool calling")
+
+    # RAG Behavior
     include_rag_instruction: bool = Field(..., description="Include RAG instruction in system prompt")
-    updated_at: Optional[str] = Field(None, description="ISO timestamp of last update")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "id": 1,
+                "updated_at": "2025-11-22T10:30:00Z",
                 "prompt_general": "You are a helpful AI assistant...",
-                "prompt_analysis": "Analyze the student learning session and provide...",
+                "prompt_analysis": "Analyze the student learning session and provide insights...",
+                "prompt_refine": "Refine the user's question to be more specific and clear...",
                 "default_top_k": 5,
                 "max_top_k": 10,
                 "similarity_threshold": 0.7,
                 "tool_calling_max_iterations": 10,
                 "tool_calling_enabled": True,
-                "include_rag_instruction": True,
-                "updated_at": "2025-11-08T10:30:00Z"
+                "include_rag_instruction": True
             }
         }
 
@@ -223,6 +234,7 @@ class RAGSettingsUpdate(BaseModel):
     """Request body for updating RAG settings."""
     prompt_general: Optional[str] = Field(None, description="General system prompt prepended to all conversations")
     prompt_analysis: Optional[str] = Field(None, description="Analysis prompt for evaluating student learning sessions")
+    prompt_refine: Optional[str] = Field(None, description="Refine prompt for improving user queries")
     default_top_k: Optional[int] = Field(None, description="Default number of search results", ge=1, le=100)
     max_top_k: Optional[int] = Field(None, description="Maximum number of search results", ge=1, le=100)
     similarity_threshold: Optional[float] = Field(None, description="Minimum similarity score (0-1)", ge=0, le=1)
@@ -235,6 +247,7 @@ class RAGSettingsUpdate(BaseModel):
             "example": {
                 "prompt_general": "You are a helpful AI assistant...",
                 "prompt_analysis": "Analyze the student learning session and provide...",
+                "prompt_refine": "Refine the user's question to be more specific and clear...",
                 "default_top_k": 5,
                 "max_top_k": 10,
                 "similarity_threshold": 0.7,
