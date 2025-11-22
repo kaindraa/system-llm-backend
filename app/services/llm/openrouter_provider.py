@@ -223,21 +223,42 @@ class OpenRouterProvider(BaseLLMProvider):
                 }
             return
 
-        # Bind tools to the model
-        model_with_tools = self._client.bind_tools(tools)
+        # Try to bind tools to the model
+        try:
+            model_with_tools = self._client.bind_tools(tools)
+            logger.info(f"[OPENROUTER] Successfully bound {len(tools)} tool(s) to {self.model_name}")
+        except Exception as e:
+            logger.error(f"[OPENROUTER] Failed to bind tools: {e}. Falling back to non-tool mode.", exc_info=True)
+            # Fall back to regular streaming without tool calling
+            async for chunk in self.agenerate_stream(messages):
+                yield {
+                    "type": "chunk",
+                    "content": chunk
+                }
+            return
 
         iteration = 0
 
         while iteration < max_iterations:
             iteration += 1
-            logger.debug(f"Tool calling iteration {iteration}/{max_iterations}")
+            logger.debug(f"[OPENROUTER] Tool calling iteration {iteration}/{max_iterations}")
 
             # Get response from model (non-streaming first to detect tool calls)
-            response = await model_with_tools.ainvoke(langchain_messages)
+            try:
+                response = await model_with_tools.ainvoke(langchain_messages)
+            except Exception as e:
+                logger.error(f"[OPENROUTER] Tool calling invocation failed: {e}. Falling back to non-tool mode.", exc_info=True)
+                # Fall back to regular streaming without tool calling
+                async for chunk in self.agenerate_stream(messages):
+                    yield {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+                return
 
             # Check if there are tool calls in the response
             if response.tool_calls:
-                logger.info(f"LLM generated {len(response.tool_calls)} tool call(s)")
+                logger.info(f"[OPENROUTER] LLM generated {len(response.tool_calls)} tool call(s)")
 
                 # Add assistant message with tool calls to message history
                 langchain_messages.append(response)
@@ -248,7 +269,7 @@ class OpenRouterProvider(BaseLLMProvider):
                     tool_input = tool_call["args"]
                     tool_id = tool_call["id"]
 
-                    logger.info(f"LLM called tool: {tool_name} with input: {tool_input}")
+                    logger.info(f"[OPENROUTER] LLM called tool: {tool_name} with input: {tool_input}")
 
                     # Yield tool call event
                     yield {
@@ -273,17 +294,41 @@ class OpenRouterProvider(BaseLLMProvider):
                         try:
                             # Execute the tool
                             tool_result = tool_to_run.func(**tool_input)
-                            logger.info(f"Tool {tool_name} executed successfully")
+                            logger.info(f"[OPENROUTER] Tool '{tool_name}' executed successfully")
 
-                            # Yield tool result event
-                            yield {
-                                "type": "tool_result",
-                                "content": {
-                                    "tool_name": tool_name,
-                                    "tool_id": tool_id,
-                                    "result": tool_result
+                            # Yield tool result event with different types for different tools
+                            # This matches OpenAI provider behavior for compatibility with chat_service
+                            if tool_name == "refine_prompt":
+                                logger.info(f"[OPENROUTER] Yielding refine_prompt_result event")
+                                yield {
+                                    "type": "refine_prompt_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
                                 }
-                            }
+                            elif tool_name == "semantic_search":
+                                logger.info(f"[OPENROUTER] Yielding rag_search_result event")
+                                yield {
+                                    "type": "rag_search_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
+                            else:
+                                # Default for other tools
+                                logger.info(f"[OPENROUTER] Yielding tool_result event for {tool_name}")
+                                yield {
+                                    "type": "tool_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "result": tool_result
+                                    }
+                                }
 
                             # Format tool result for LLM (JSON for structured data)
                             if isinstance(tool_result, dict):
@@ -297,15 +342,35 @@ class OpenRouterProvider(BaseLLMProvider):
                             )
 
                         except Exception as e:
-                            logger.error(f"Tool execution failed: {e}", exc_info=True)
-                            yield {
-                                "type": "tool_result",
-                                "content": {
-                                    "tool_name": tool_name,
-                                    "tool_id": tool_id,
-                                    "error": str(e)
+                            logger.error(f"[OPENROUTER] Tool '{tool_name}' execution failed: {e}", exc_info=True)
+                            # Yield error with appropriate type
+                            if tool_name == "refine_prompt":
+                                yield {
+                                    "type": "refine_prompt_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "error": str(e)
+                                    }
                                 }
-                            }
+                            elif tool_name == "semantic_search":
+                                yield {
+                                    "type": "rag_search_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "error": str(e)
+                                    }
+                                }
+                            else:
+                                yield {
+                                    "type": "tool_result",
+                                    "content": {
+                                        "tool_name": tool_name,
+                                        "tool_id": tool_id,
+                                        "error": str(e)
+                                    }
+                                }
                             # Create error message
                             tool_message = ToolMessage(
                                 content=f"Error executing tool: {str(e)}",
@@ -314,7 +379,7 @@ class OpenRouterProvider(BaseLLMProvider):
                             )
 
                     else:
-                        logger.error(f"Tool not found: {tool_name}")
+                        logger.error(f"[OPENROUTER] Tool not found: {tool_name}")
                         # Create error message for missing tool
                         tool_message = ToolMessage(
                             content=f"Error: Tool '{tool_name}' not found",
@@ -329,7 +394,7 @@ class OpenRouterProvider(BaseLLMProvider):
             else:
                 # No tool calls, stream LLM text response word-by-word
                 if response.content:
-                    logger.debug("LLM generated text response - streaming words")
+                    logger.debug("[OPENROUTER] LLM generated text response - streaming words")
                     # Stream response word-by-word for real-time typing effect
                     content = response.content
                     words = content.split()
@@ -341,13 +406,13 @@ class OpenRouterProvider(BaseLLMProvider):
                             "content": token
                         }
                 else:
-                    logger.debug("Tool calling loop completed - no content to stream")
+                    logger.debug("[OPENROUTER] Tool calling loop completed - no content to stream")
 
-                logger.debug("Tool calling loop completed - LLM response ready")
+                logger.debug("[OPENROUTER] Tool calling loop completed - LLM response ready")
                 break
 
         if iteration >= max_iterations:
-            logger.warning(f"Tool calling reached max iterations ({max_iterations})")
+            logger.warning(f"[OPENROUTER] Tool calling reached max iterations ({max_iterations})")
             yield {
                 "type": "chunk",
                 "content": "[Tool calling max iterations reached]"
@@ -355,24 +420,50 @@ class OpenRouterProvider(BaseLLMProvider):
 
     def _supports_tool_calling(self) -> bool:
         """
-        Check if the model supports tool calling.
+        Check if the model supports tool calling on OpenRouter.
 
-        OpenRouter model support for tool calling:
-        - Llama 3.1: Limited support
-        - Qwen 2.5: Limited support
+        Models with tool calling support on OpenRouter:
+        - Llama 3.1+: Good support (best open-source option)
+        - Qwen 2.5+: Basic support
+        - Mistral family: Good support
+        - Mixtral family: Good support (MoE)
+        - DeepSeek: Good support
+
+        Models WITHOUT tool support:
         - Phi-3: No tool support
+        - Other small models
 
         Returns:
             True if model likely supports tool calling, False otherwise
         """
-        # Models known to support tool calling
+        # Get model name in lowercase for comparison
+        model_lower = self.model_name.lower()
+
+        # Models known to support tool calling well on OpenRouter
         tool_supporting_models = [
-            "meta-llama/llama-3.1",  # Llama 3.1 has basic support
-            "qwen/qwen-2.5",  # Qwen 2.5 may have support
+            "llama",  # All Llama versions (3.1, 3.2, 4, etc)
+            "qwen",  # All Qwen versions
+            "mistral",  # Mistral family
+            "mixtral",  # Mixtral family (MoE)
+            "deepseek",  # DeepSeek models
         ]
 
+        # Check if model is in the supported list
         for supported in tool_supporting_models:
-            if supported in self.model_name:
+            if supported in model_lower:
+                logger.info(f"[OPENROUTER] Model {self.model_name} supports tool calling")
                 return True
 
-        return False
+        # Explicitly blocked models
+        blocked_models = [
+            "phi",  # Phi-3, Phi-4 etc don't support tools
+        ]
+
+        for blocked in blocked_models:
+            if blocked in model_lower:
+                logger.warning(f"[OPENROUTER] Model {self.model_name} does NOT support tool calling")
+                return False
+
+        # Default: assume it might support tools and try
+        logger.debug(f"[OPENROUTER] Model {self.model_name} not in whitelist - will attempt tool calling")
+        return True
