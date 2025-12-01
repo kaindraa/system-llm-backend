@@ -357,7 +357,7 @@ async def download_file(
     - **file_id**: UUID of the file
 
     Returns the PDF file as binary response for download using chunked streaming.
-    Optimized for speed with minimal logging overhead.
+    Optimized for speed with adaptive chunk sizing and minimal logging overhead.
 
     **Requires authentication. All users can download any file.**
     """
@@ -370,11 +370,21 @@ async def download_file(
         document = file_service.get_file(file_id_str)
         logger.info(f"[download] Starting download: {document.original_filename} ({document.file_size} bytes)")
 
+        # Calculate optimal chunk size based on file size (for faster streaming)
+        # Larger files use larger chunks for better throughput
+        file_size = document.file_size or 0
+        if file_size > 100 * 1024 * 1024:  # > 100MB
+            chunk_size = 20 * 1024 * 1024  # 20MB chunks
+        elif file_size > 50 * 1024 * 1024:  # > 50MB
+            chunk_size = 15 * 1024 * 1024  # 15MB chunks
+        else:  # <= 50MB
+            chunk_size = 10 * 1024 * 1024  # 10MB chunks (default)
+
         # Stream file content in chunks
         def file_iterator():
             """Generator function to stream file content in chunks"""
             try:
-                for chunk in file_service.stream_file_content(file_id_str, chunk_size=10 * 1024 * 1024):  # 10MB chunks
+                for chunk in file_service.stream_file_content(file_id_str, chunk_size=chunk_size):
                     yield chunk
                 logger.info(f"[download] Success: {file_id_str}")
             except Exception as e:
@@ -382,13 +392,12 @@ async def download_file(
                 raise
 
         # Return file as streaming response with proper headers
+        # Note: Do NOT set Content-Length with StreamingResponse - it uses chunked transfer encoding
         return StreamingResponse(
             file_iterator(),
             media_type=document.mime_type or "application/pdf",
             headers={
                 "Content-Disposition": f"attachment; filename={document.original_filename}",
-                "Content-Type": document.mime_type or "application/pdf",
-                "Content-Length": str(document.file_size),
                 "Cache-Control": "no-cache, no-store, must-revalidate",
             }
         )

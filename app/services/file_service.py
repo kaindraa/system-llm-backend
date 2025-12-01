@@ -380,12 +380,20 @@ class GCSStorageProvider(FileStorageProvider):
             blob_name = self._get_blob_name(file_id)
             blob = self.bucket.blob(blob_name)
 
-            # Download full file from GCS (simplest & fastest approach)
+            # Download full file from GCS with timeout handling
             # GCS library handles all optimizations internally
-            full_content = blob.download_as_bytes()
+            logger.info(f"[GCSStorageProvider.stream] Starting download from GCS - file_id: {file_id}, blob: {blob_name}")
+
+            try:
+                full_content = blob.download_as_bytes(timeout=120)  # 2-minute timeout
+            except Exception as gcs_error:
+                logger.error(f"[GCSStorageProvider.stream] GCS download failed - file_id: {file_id}, error: {str(gcs_error)}", exc_info=True)
+                raise
 
             if not full_content:
                 raise FileNotFoundError(f"File is empty in GCS: {file_id}")
+
+            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS")
 
             # Stream in chunks for memory efficiency
             offset = 0
@@ -393,8 +401,15 @@ class GCSStorageProvider(FileStorageProvider):
 
             while offset < total_size:
                 chunk_end = min(offset + chunk_size, total_size)
-                yield full_content[offset:chunk_end]
+                chunk = full_content[offset:chunk_end]
+
+                if not chunk:
+                    raise RuntimeError(f"Failed to read chunk at offset {offset}")
+
+                yield chunk
                 offset = chunk_end
+
+            logger.info(f"[GCSStorageProvider.stream] Completed streaming file {file_id}")
 
         except FileNotFoundError:
             raise
