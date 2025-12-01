@@ -262,7 +262,7 @@ class GCSStorageProvider(FileStorageProvider):
 
     def _get_blob_name(self, file_id: str) -> str:
         """Get GCS blob name for given file_id"""
-        return f"{file_id}.pdf"
+        return f"uploads/{file_id}.pdf"
 
     def save(self, file_id: str, content: bytes) -> str:
         """Save file to GCS with verification"""
