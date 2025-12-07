@@ -1,4 +1,7 @@
 from sqladmin import ModelView
+from sqlalchemy.orm import Session
+from wtforms import PasswordField
+from wtforms.validators import DataRequired, Length, Optional
 from app.models.user import User
 from app.models.model import Model
 from app.models.prompt import Prompt
@@ -6,6 +9,7 @@ from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.chat_session import ChatSession
 from app.models.chat_config import ChatConfig
+from app.core.security import get_password_hash
 
 
 class UserAdmin(ModelView, model=User):
@@ -23,7 +27,8 @@ class UserAdmin(ModelView, model=User):
 
     # Detail view configuration
     column_details_exclude_list = [User.password_hash, User.chat_sessions]
-    form_excluded_columns = [User.password_hash, User.created_at, User.updated_at, User.chat_sessions]
+    # Removed User.password_hash from form_excluded_columns to allow password input
+    form_excluded_columns = [User.created_at, User.updated_at, User.chat_sessions]
 
     # Permissions
     can_create = True
@@ -44,6 +49,31 @@ class UserAdmin(ModelView, model=User):
         User.created_at: "Created",
         User.updated_at: "Updated",
     }
+
+    # Form configuration
+    form_args = {
+        "password_hash": {
+            "label": "Password",
+            "validators": [DataRequired()],
+            "description": "Enter password for the user",
+        },
+    }
+
+    async def on_model_change(self, data: dict, model: User, is_create: bool, request) -> None:
+        """
+        Handle password hashing before saving user.
+        This method is called before CREATE and UPDATE operations.
+        """
+        # Only hash password if it's provided and looks like plaintext (not already hashed)
+        if "password_hash" in data and data["password_hash"]:
+            password = data["password_hash"]
+            # Check if password is not already hashed (bcrypt hashes start with $2a$, $2b$, or $2y$)
+            if not (password.startswith("$2a$") or password.startswith("$2b$") or password.startswith("$2y$")):
+                # Hash the password
+                data["password_hash"] = get_password_hash(password)
+        elif is_create:
+            # If creating a new user and no password provided, raise error
+            raise ValueError("Password is required when creating a new user")
 
 
 class ModelAdmin(ModelView, model=Model):
