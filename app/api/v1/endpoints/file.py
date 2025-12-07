@@ -393,11 +393,20 @@ async def download_file(
 
         # Return file as streaming response with proper headers
         # Note: Do NOT set Content-Length with StreamingResponse - it uses chunked transfer encoding
+
+        # Encode filename using RFC 5987 for proper Unicode support in HTTP headers
+        # This handles filenames with special characters like emojis
+        from urllib.parse import quote
+
+        # RFC 5987 encoding: filename*=UTF-8''percent-encoded-filename
+        # The quote() function will percent-encode the string
+        safe_filename = quote(document.original_filename, safe='')
+
         return StreamingResponse(
             file_iterator(),
             media_type=document.mime_type or "application/pdf",
             headers={
-                "Content-Disposition": f"attachment; filename={document.original_filename}",
+                "Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}",
                 "Cache-Control": "no-cache, no-store, must-revalidate",
             }
         )
