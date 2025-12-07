@@ -2,6 +2,7 @@ from sqladmin import ModelView
 from sqlalchemy.orm import Session
 from wtforms import PasswordField
 from wtforms.validators import DataRequired, Length, Optional
+from uuid import UUID
 from app.models.user import User
 from app.models.model import Model
 from app.models.prompt import Prompt
@@ -124,7 +125,8 @@ class PromptAdmin(ModelView, model=Prompt):
     column_default_sort = [(Prompt.created_at, True)]
 
     # Detail view
-    form_excluded_columns = [Prompt.created_at, Prompt.updated_at]
+    # Exclude created_by from form - it will be auto-set to current admin user
+    form_excluded_columns = [Prompt.created_at, Prompt.updated_at, Prompt.created_by]
 
     # Permissions
     can_create = True
@@ -143,6 +145,21 @@ class PromptAdmin(ModelView, model=Prompt):
         Prompt.created_at: "Created",
         Prompt.updated_at: "Updated",
     }
+
+    async def on_model_change(self, data: dict, model: Prompt, is_create: bool, request) -> None:
+        """
+        Handle auto-setting created_by to current admin user before saving.
+        This method is called before CREATE and UPDATE operations.
+        """
+        if is_create:
+            # Get current admin user ID from session
+            user_id = request.session.get("user_id")
+            if user_id:
+                # Convert user_id string to UUID
+                data["created_by"] = UUID(user_id)
+            else:
+                # Fallback: raise error if no user_id in session
+                raise ValueError("Cannot create prompt: No authenticated user found in session")
 
 
 class DocumentAdmin(ModelView, model=Document):
