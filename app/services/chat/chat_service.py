@@ -608,6 +608,8 @@ class ChatService:
 
                         logger.info(f"[CHAT_SERVICE] 📥 Received rag_search_result from provider")
                         logger.info(f"[CHAT_SERVICE] Tool: {tool_name}, Error: {error}")
+                        logger.info(f"[CHAT_SERVICE] Full result object: {result}")
+                        logger.info(f"[CHAT_SERVICE] Result type: {type(result)}, Result keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
 
                         if error:
                             logger.warning(f"Tool {tool_name} error: {error}")
@@ -618,6 +620,8 @@ class ChatService:
                             # Extract sources from tool result
                             if isinstance(result, dict):
                                 tool_sources = result.get("sources", [])
+                                logger.info(f"[CHAT_SERVICE] Extracted {len(tool_sources)} sources from tool result")
+                                logger.info(f"[CHAT_SERVICE] Tool sources: {tool_sources}")
                                 sources_list.extend(tool_sources)
 
                                 # Add to real_messages (Option A) - CHUNKS ARE HERE!
@@ -671,10 +675,21 @@ class ChatService:
                         result = event_content.get("result")
                         error = event_content.get("error")
 
+                        logger.info(f"[CHAT_SERVICE] 📥 Received tool_result event (fallback)")
+                        logger.info(f"[CHAT_SERVICE] Tool: {tool_name}, Error: {error}")
+                        logger.info(f"[CHAT_SERVICE] Result: {result}")
+
                         if error:
                             logger.warning(f"Tool {tool_name} error: {error}")
                         else:
                             logger.debug(f"Tool {tool_name} executed successfully")
+
+                            # Also extract sources for semantic_search tool in tool_result event
+                            if tool_name == "semantic_search" and isinstance(result, dict):
+                                tool_sources = result.get("sources", [])
+                                logger.info(f"[CHAT_SERVICE] 📌 TOOL_RESULT: Extracted {len(tool_sources)} sources from semantic_search")
+                                logger.info(f"[CHAT_SERVICE] Sources: {tool_sources}")
+                                sources_list.extend(tool_sources)
 
                     elif event_type == "chunk":
                         # Streaming text response from LLM
@@ -696,14 +711,23 @@ class ChatService:
             logger.error(f"LLM error in session {session_id}: {str(e)}")
             raise
 
-        # Remove duplicate sources (by document_id and page)
+        # Remove duplicate sources (by document_id and page) and normalize field names
         unique_sources = []
         if use_rag and sources_list:
             seen = set()
             for source in sources_list:
-                key = (source.get("document_id"), source.get("page"))
+                # Normalize field names for consistency with frontend
+                # RAG service returns: document_id, filename, page, similarity_score
+                # Frontend expects: document_id, document_name, page_number, similarity_score
+                normalized = {
+                    "document_id": source.get("document_id", ""),
+                    "document_name": source.get("filename") or source.get("document_name", "Document"),  # Support both field names
+                    "page_number": source.get("page") or source.get("page_number", 1),  # Support both field names
+                    "similarity_score": source.get("similarity_score", 0.85)
+                }
+                key = (normalized["document_id"], normalized["page_number"])
                 if key not in seen:
-                    unique_sources.append(source)
+                    unique_sources.append(normalized)
                     seen.add(key)
 
         # Create assistant message (MINIMAL format - ONLY role + content for interaction_messages)
@@ -770,8 +794,15 @@ class ChatService:
             f" | sources: {len(unique_sources)}"
         )
 
-        # Yield done signal with assistant message
-        yield {"type": "done", "content": assistant_message}
+        # Yield done signal with assistant message and sources
+        done_payload = {
+            "type": "done",
+            "content": full_content,  # Send the string content, not the entire message object
+            "sources": unique_sources if unique_sources else [],  # Include sources in done event
+            "tool_calls": []  # For future tool call support
+        }
+        logger.info(f"[CHAT_SERVICE] 📤 YIELDING done event with {len(unique_sources)} sources")
+        yield done_payload
 
     async def analyze_session(
         self,
