@@ -3,9 +3,8 @@ version: '3.8'
 # Docker Compose untuk local development dengan LocalStorage dan Local PostgreSQL
 # Usage: docker-compose -f docker-compose.local.yml up -d
 #
-# Services:
+# Simplified - hanya 3 services:
 # - postgres: Local PostgreSQL database (port 5432)
-# - redis: Redis message broker for Celery (port 6379)
 # - pgadmin: Database management UI (port 5050)
 # - api: FastAPI backend (port 8000) dengan LocalFileStorage
 
@@ -14,37 +13,17 @@ services:
     image: postgres:15-alpine
     container_name: system-llm-postgres-local
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llm_password_local}
       POSTGRES_DB: ${POSTGRES_DB:-system_llm}
-      # pgvector extension
-      POSTGRES_INITDB_ARGS: "-c max_connections=200"
     ports:
       - "5432:5432"
     volumes:
       - postgres_data_local:/var/lib/postgresql/data
-      # Enable pgvector extension on startup
-      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
-    networks:
-      - system-llm-network-local
+      # Skip pgvector init untuk LOCAL - akan dibuat via migration atau manual
+      # - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-system_llm}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: system-llm-redis-local
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data_local:/data
-    networks:
-      - system-llm-network-local
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llm_user} -d ${POSTGRES_DB:-system_llm}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,8 +40,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - system-llm-network-local
     restart: unless-stopped
 
   api:
@@ -75,61 +52,32 @@ services:
     volumes:
       - .:/app
       - /app/logs
-      # Mount local storage directory
       - ./storage:/app/storage
     env_file:
       - .env.local
     environment:
-      # Database - connect ke postgres container
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-system_llm}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-llm_user}:${POSTGRES_PASSWORD:-llm_password_local}@postgres:5432/${POSTGRES_DB:-system_llm}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llm_password_local}
       POSTGRES_DB: ${POSTGRES_DB:-system_llm}
-
-      # Security
       SECRET_KEY: ${SECRET_KEY}
       ALGORITHM: ${ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-
-      # API Config
       PROJECT_NAME: ${PROJECT_NAME:-System LLM}
       API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
       DEBUG: ${DEBUG:-true}
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-["http://localhost:3000","http://localhost:3001","http://localhost:8000"]}
-
-      # LLM API Keys
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
-
-      # Storage - LOCAL (no GCS credentials needed)
       STORAGE_TYPE: local
-
-      # Celery Configuration - Redis as broker
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-
-      # Embedding Model
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-
-    networks:
-      - system-llm-network-local
-
     restart: unless-stopped
 
 volumes:
   postgres_data_local:
     driver: local
-  redis_data_local:
-    driver: local
-
-networks:
-  system-llm-network-local:
-    driver: bridge

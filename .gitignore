@@ -70,7 +70,6 @@ dmypy.json
 docker-compose.override.yml
 
 # Uploaded Files (for later stages)
-uploads/
 static/uploads/
 
 # macOS
@@ -81,8 +80,8 @@ static/uploads/
 #Claude
 .claude/
 
-#Docs
-/docs
+# Unused files and backups
+unused/
 
 system_llm_backup.sql
 credentials/
@@ -96,3 +95,6 @@ system-llm-backend\system-llm-storage-key.json
 temp.json
 temp2.json
 
+backup/
+
+docs/

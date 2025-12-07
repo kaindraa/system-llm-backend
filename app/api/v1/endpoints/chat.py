@@ -420,9 +420,11 @@ async def send_message(
 
         except ValueError as e:
             logger.error(f"Invalid request: {str(e)}")
+            db.rollback()  # Reset database transaction state
             yield f"event: error\ndata: {json.dumps({'error': str(e), 'status': 400})}\n\n"
         except Exception as e:
             logger.error(f"Error sending message: {str(e)}", exc_info=True)
+            db.rollback()  # Reset database transaction state
             yield f"event: error\ndata: {json.dumps({'error': f'Failed to send message: {str(e)}', 'status': 500})}\n\n"
 
     return StreamingResponse(
