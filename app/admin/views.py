@@ -1,8 +1,9 @@
 from sqladmin import ModelView
 from sqlalchemy.orm import Session
-from wtforms import PasswordField
+from wtforms import PasswordField, StringField
 from wtforms.validators import DataRequired, Length, Optional
 from uuid import UUID
+from pgvector.sqlalchemy import Vector
 from app.models.user import User
 from app.models.model import Model
 from app.models.prompt import Prompt
@@ -230,8 +231,19 @@ class DocumentChunkAdmin(ModelView, model=DocumentChunk):
     ]
     column_default_sort = [(DocumentChunk.created_at, True)]
 
-    # Detail view
-    form_excluded_columns = [DocumentChunk.created_at, DocumentChunk.embedding]
+    # Detail view - exclude embedding (vector data), chunk_metadata (JSONB serialization issues), and created_at (read-only)
+    column_details_exclude_list = [DocumentChunk.embedding, DocumentChunk.chunk_metadata, DocumentChunk.created_at]
+    form_excluded_columns = [DocumentChunk.created_at, DocumentChunk.embedding, DocumentChunk.chunk_metadata]
+
+    # Field type formatters to handle pgvector Vector type safely
+    column_type_formatters = {
+        Vector: lambda m: "[Vector Embedding - Hidden for Performance]"
+    }
+
+    # Model converters to prevent SQLAdmin from trying to load Vector columns as form fields
+    model_form_converters = {
+        Vector: None  # Skip Vector type in form conversion
+    }
 
     # Permissions - Read-only for monitoring
     can_create = False
@@ -281,8 +293,9 @@ class ChatSessionAdmin(ModelView, model=ChatSession):
     ]
     column_default_sort = [(ChatSession.started_at, True)]
 
-    # Detail view
-    form_excluded_columns = [ChatSession.started_at, ChatSession.ended_at, ChatSession.analyzed_at]
+    # Detail view - exclude JSONB fields to prevent serialization errors
+    column_details_exclude_list = [ChatSession.messages, ChatSession.interaction_messages, ChatSession.real_messages, ChatSession.started_at, ChatSession.ended_at, ChatSession.analyzed_at]
+    form_excluded_columns = [ChatSession.started_at, ChatSession.ended_at, ChatSession.analyzed_at, ChatSession.messages, ChatSession.interaction_messages, ChatSession.real_messages]
 
     # Permissions - Read-only for research
     can_create = False
