@@ -189,9 +189,17 @@ Untuk LOCAL development, **hanya perlu SATU API Key** saja. Pilih salah satu:
 
 Pastikan Anda masih di folder `system-llm-backend`, kemudian jalankan:
 
+**Windows (PowerShell):**
+```bash
+docker-compose --env-file .env.local -f docker-compose.local.yml up -d
+```
+
+**Mac/Linux:**
 ```bash
 docker-compose -f docker-compose.local.yml up -d
 ```
+
+Flag `--env-file .env.local` **penting untuk Windows** agar docker-compose membaca `.env.local` dengan benar.
 
 **Apa yang terjadi:**
 - Docker akan download dan build semua service
@@ -436,7 +444,27 @@ Password: admin123
 
 ## Perintah Umum
 
-**Backend (docker-compose):**
+**CATATAN: Untuk Windows, tambahkan `--env-file .env.local` di awal command agar docker-compose membaca environment variables dengan benar.**
+
+**Backend (docker-compose) - Windows:**
+```bash
+# Lihat log
+docker-compose --env-file .env.local -f docker-compose.local.yml logs api
+
+# Hentikan services
+docker-compose -f docker-compose.local.yml down
+
+# Restart services
+docker-compose --env-file .env.local -f docker-compose.local.yml up -d
+
+# Akses database
+docker-compose --env-file .env.local -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm
+
+# Akses backend shell
+docker-compose --env-file .env.local -f docker-compose.local.yml exec api bash
+```
+
+**Backend (docker-compose) - Mac/Linux:**
 ```bash
 # Lihat log
 docker-compose -f docker-compose.local.yml logs api
@@ -445,7 +473,7 @@ docker-compose -f docker-compose.local.yml logs api
 docker-compose -f docker-compose.local.yml down
 
 # Restart services
-docker-compose -f docker-compose.local.yml restart
+docker-compose -f docker-compose.local.yml up -d
 
 # Akses database
 docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm
@@ -621,13 +649,27 @@ Verify dengan: `pnpm --version`
 
 **Solusi:**
 
-Docker **membaca `.env.local` saat startup**. Jika sudah running, config lama tetap dipakai. Harus restart:
+Docker **membaca `.env.local` saat startup**. Jika sudah running, config lama tetap dipakai. Harus restart.
 
+**Windows (PowerShell):**
 ```bash
 # Stop semua container
 docker-compose -f docker-compose.local.yml down
 
-# Start lagi (akan membaca .env.local yang baru)
+# Start lagi dengan --env-file flag (penting untuk Windows)
+docker-compose --env-file .env.local -f docker-compose.local.yml up -d
+
+# Jalankan migration dan import data lagi
+docker-compose --env-file .env.local -f docker-compose.local.yml exec api python -m alembic upgrade head
+docker-compose --env-file .env.local -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
+```
+
+**Mac/Linux:**
+```bash
+# Stop semua container
+docker-compose -f docker-compose.local.yml down
+
+# Start lagi
 docker-compose -f docker-compose.local.yml up -d
 
 # Jalankan migration dan import data lagi
