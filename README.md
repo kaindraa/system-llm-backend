@@ -40,12 +40,16 @@ Semua harus menampilkan versi, bukan "command not found".
 
 ### Step 1: Buat Folder Project dan Clone Repository
 
-Buat folder baru untuk project:
+**PENTING: Tentukan satu folder untuk project dan gunakan konsisten!**
+
+Buat folder baru untuk project (pilih SATU tempat):
 
 ```bash
 mkdir system-llm
 cd system-llm
 ```
+
+**Gunakan folder ini untuk semua step selanjutnya.** Jangan ganti-ganti folder!
 
 Clone backend dan frontend di folder yang sama:
 
@@ -227,12 +231,10 @@ docker-compose -f docker-compose.local.yml exec api python -m alembic upgrade he
 #### 4b. Import Admin User & AI Models
 
 Import data awal ke database:
-
+(PowerShell)
 ```bash
-docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
+type scripts/init.sql | docker-compose -f docker-compose.local.yml exec -T postgres psql -U llm_user -d system_llm
 ```
-
-**Expected output:** Tidak ada output (normal).
 
 **Apa yang diimport:**
 - Admin user: `admin@example.com` / Password: `admin123`
@@ -242,7 +244,7 @@ docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d sys
 
 **Verifikasi selesai:**
 ```bash
-docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT COUNT(*) as total_models FROM ai_model;"
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT COUNT(*) as total_models FROM model;"
 ```
 
 Harus menampilkan angka (jumlah AI models, minimal 3).
@@ -251,11 +253,15 @@ Harus menampilkan angka (jumlah AI models, minimal 3).
 
 Frontend adalah aplikasi yang user lihat di browser (interface).
 
+**PENTING: Pastikan Anda di folder yang SAMA seperti Step 1!**
+
+Jika Anda di folder yang berbeda (misal `install-system-llm` vs `system-llm`), file `.env.example` tidak akan ditemukan.
+
 #### 5a. Buka Terminal Baru
 
 Buka terminal/PowerShell **BARU** (jangan tutup terminal sebelumnya yang menjalankan Docker).
 
-Masuk ke folder frontend (dari parent `system-llm` folder):
+Masuk ke folder frontend (dari parent `system-llm` folder yang sama seperti Step 1):
 
 ```bash
 cd ../system-llm-frontend
@@ -286,7 +292,7 @@ Copy-Item .env.example -Destination .env.local
 cp .env.example .env.local
 ```
 
-Edit file `.env.local` (buka dengan text editor) dan ganti isi dengan:
+Edit file `.env.local` (buka dengan text editor) dan ganti isi dengan (Jika belum ada):
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
@@ -608,6 +614,40 @@ Verify dengan: `pnpm --version`
    ```
 
 **Penting:** Username harus `llm_user` (bukan `postgres`) untuk LOCAL setup.
+
+### Error: "CORS policy: Response to preflight request doesn't pass access control check"
+
+**Penyebab:** Docker container sudah running dengan config lama. Perubahan di `.env.local` belum terbaca container.
+
+**Solusi:**
+
+Docker **membaca `.env.local` saat startup**. Jika sudah running, config lama tetap dipakai. Harus restart:
+
+```bash
+# Stop semua container
+docker-compose -f docker-compose.local.yml down
+
+# Start lagi (akan membaca .env.local yang baru)
+docker-compose -f docker-compose.local.yml up -d
+
+# Jalankan migration dan import data lagi
+docker-compose -f docker-compose.local.yml exec api python -m alembic upgrade head
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
+```
+
+**Verifikasi CORS sudah aktif:**
+
+Windows (PowerShell):
+```bash
+docker-compose -f docker-compose.local.yml logs api | Select-String -Pattern "CORS"
+```
+
+Mac/Linux:
+```bash
+docker-compose -f docker-compose.local.yml logs api | grep -i cors
+```
+
+Harus menampilkan CORS origins yang benar (termasuk frontend port yang digunakan).
 
 ### Still having issues?
 
