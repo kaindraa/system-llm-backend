@@ -18,11 +18,21 @@ Sebelum memulai, pastikan sudah terinstal:
 - **Node.js** (untuk frontend) → [Download](https://nodejs.org/)
 - **Python 3.x** (untuk backend) → [Download](https://www.python.org/)
 
-**API Keys yang diperlukan:**
-- OpenAI API Key → [Dapatkan](https://platform.openai.com/api-keys)
-- Anthropic API Key → [Dapatkan](https://console.anthropic.com/)
-- Google API Key → [Dapatkan](https://cloud.google.com/docs/authentication/api-keys)
-- OpenRouter API Key → [Dapatkan](https://openrouter.ai/keys)
+**API Keys yang diperlukan (minimal):**
+- OpenAI API Key → [Dapatkan](https://platform.openai.com/api-keys) (untuk embedding dan chat)
+
+### Verifikasi Prerequisites
+
+Setelah install semua requirements, buka terminal/PowerShell dan check versi:
+
+```bash
+git --version
+docker --version
+node --version
+python --version
+```
+
+Semua harus menampilkan versi, bukan "command not found".
 
 ---
 
@@ -61,17 +71,36 @@ Masuk ke folder backend:
 cd system-llm-backend
 ```
 
-Salin file environment lokal:
+#### 2a. Buat File `.env.local`
+
+**PENTING: Buat file dengan nama `.env.local` (untuk local development)**
+
+Salin file environment example:
 
 ```bash
 # Windows (PowerShell)
-Copy-Item .env.local -Destination .env
+Copy-Item .env.example -Destination .env.local
 
 # Mac/Linux
-cp .env.local .env
+cp .env.example .env.local
 ```
 
-Edit file `.env` dan tambahkan API keys:
+**Verify file sudah dibuat:**
+```bash
+# Windows (PowerShell)
+Get-Item .env.local
+
+# Mac/Linux
+ls -la .env.local
+```
+
+Harus menampilkan file `.env.local`.
+
+#### 2b. Edit File `.env.local`
+
+Buka file `.env.local` dengan text editor (Notepad, VSCode, dll) dan ganti isi dengan berikut:
+
+**BAGIAN 1: Database & Security Configuration (WAJIB DIISI)**
 
 ```env
 # Database
@@ -80,91 +109,221 @@ POSTGRES_PASSWORD=llm_password_local
 POSTGRES_DB=system_llm
 DATABASE_URL=postgresql://llm_user:llm_password_local@postgres:5432/system_llm
 
+# Security
+# Untuk LOCAL development: gunakan value di bawah (tidak perlu generate)
+# Untuk PRODUCTION: generate dengan: openssl rand -base64 32
+SECRET_KEY=your-secret-key-local-development-only
+
 # Storage
 STORAGE_TYPE=local
 STORAGE_LOCAL_PATH=/app/storage
-
-# API Keys (isi dengan keys yang sudah diperoleh)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...
-OPENROUTER_API_KEY=...
 
 # Debug Mode
 DEBUG=true
 LOG_LEVEL=INFO
 ```
 
+**Penjelasan BAGIAN 1:**
+
+- **DATABASE_URL:** Jangan diubah (sudah benar untuk LOCAL)
+- **SECRET_KEY:** Untuk LOCAL development, biarkan seperti itu. Hanya perlu di-generate untuk PRODUCTION
+- **STORAGE_TYPE:** Untuk LOCAL, harus `local` (bukan `gcs`)
+- **DEBUG:** Untuk development, harus `true`
+
+---
+
+**BAGIAN 2: LLM Provider Configuration (PILIH MINIMAL SATU)**
+
+Hanya isi API key dari provider yang Anda ingin gunakan. **Jika tidak ada key untuk provider, cukup hapus baris tersebut atau biarkan kosong.**
+
+```env
+# ===== PILIH MINIMAL SATU, SISA BISA DIHAPUS =====
+
+# OpenAI (untuk GPT-4, GPT-3.5, embedding)
+# Dapatkan API Key di: https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-proj-YOUR_OPENAI_KEY_HERE
+
+# Anthropic Claude (untuk Claude 3.5, Claude 3)
+# Dapatkan API Key di: https://console.anthropic.com/
+# ANTHROPIC_API_KEY=sk-ant-YOUR_CLAUDE_KEY_HERE
+
+# OpenRouter (akses semua model: GPT-4, Claude, Llama, Mistral, dll)
+# Dapatkan API Key di: https://openrouter.ai/keys
+# OPENROUTER_API_KEY=sk-or-YOUR_OPENROUTER_KEY_HERE
+
+# Google Gemini
+# Dapatkan API Key di: https://makersuite.google.com/app/apikey
+# GOOGLE_API_KEY=YOUR_GOOGLE_KEY_HERE
+
+# ===== OPTIONAL: Model Default =====
+DEFAULT_LLM_MODEL=gpt-4-mini
+```
+
+**PENJELASAN BAGIAN 2:**
+
+Untuk LOCAL development, **hanya perlu SATU API Key** saja. Pilih salah satu:
+
+**OPSI 1: OpenAI (Recommended untuk mulai)**
+- Buat akun: https://platform.openai.com/api-keys
+- Isi: `OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE`
+- Hapus/comment baris lain dengan `#`
+
+**OPSI 2: Claude (Anthropic)**
+- Buat akun: https://console.anthropic.com/
+- Isi: `ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE`
+- Hapus/comment baris lain
+
+**OPSI 3: OpenRouter (Akses semua model)**
+- Buat akun: https://openrouter.ai/keys
+- Isi: `OPENROUTER_API_KEY=sk-or-YOUR_KEY_HERE`
+- Hapus/comment baris lain
+
+
 ### Step 3: Mulai Docker Services (Backend)
+
+**PENTING: Pastikan file `.env.local` sudah dibuat dan dikonfigurasi (Step 2a & 2b) sebelum jalankan command ini!**
+
+Pastikan Anda masih di folder `system-llm-backend`, kemudian jalankan:
 
 ```bash
 docker-compose -f docker-compose.local.yml up -d
 ```
 
-Ini akan memulai:
-- PostgreSQL database (port 5432)
-- PgAdmin (port 5050)
-- Backend FastAPI (port 8000)
+**Apa yang terjadi:**
+- Docker akan download dan build semua service
+- Ini memulai 3 container:
+  - **PostgreSQL** (database, port 5432)
+  - **PgAdmin** (admin database, port 5050)
+  - **Backend API** (FastAPI, port 8000)
 
-Tunggu 30-60 detik untuk semua services terinisialisasi.
+**Tunggu 30-60 detik** sampai semua service selesai starting.
+
+**Cara check apakah running:**
+```bash
+docker-compose -f docker-compose.local.yml ps
+```
+
+Semua container harus status `Up` (bukan `Exited` atau `Error`).
+
+**Jika ada error**, check log dengan:
+```bash
+docker-compose -f docker-compose.local.yml logs
+```
 
 ### Step 4: Setup Database
 
-Jalankan database migrations:
+Database memerlukan 2 langkah setup:
+
+#### 4a. Jalankan Database Migrations
+
+Database migrations membuat struktur tabel (schema) yang diperlukan:
 
 ```bash
 docker-compose -f docker-compose.local.yml exec api python -m alembic upgrade head
 ```
 
-Import SQL dump yang berisi admin user dan AI models:
+**Expected output:** Melihat log migration berjalan, tidak ada error.
+
+#### 4b. Import Admin User & AI Models
+
+Import data awal ke database:
 
 ```bash
 docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
 ```
 
-Proses ini akan setup:
-- Admin user: `admin@example.com` / `admin123`
-- 6 AI models
-- ChatConfig
+**Expected output:** Tidak ada output (normal).
+
+**Apa yang diimport:**
+- Admin user: `admin@example.com` / Password: `admin123`
+- AI models: GPT-4, Claude, Gemini, dll
+- Chat config dan settings
 - Struktur database lengkap
+
+**Verifikasi selesai:**
+```bash
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT COUNT(*) as total_models FROM ai_model;"
+```
+
+Harus menampilkan angka (jumlah AI models, minimal 3).
 
 ### Step 5: Setup Frontend
 
-Buka terminal baru dan masuk ke folder frontend (dari parent directory):
+Frontend adalah aplikasi yang user lihat di browser (interface).
+
+#### 5a. Buka Terminal Baru
+
+Buka terminal/PowerShell **BARU** (jangan tutup terminal sebelumnya yang menjalankan Docker).
+
+Masuk ke folder frontend (dari parent `system-llm` folder):
 
 ```bash
 cd ../system-llm-frontend
 ```
 
-Install dependencies:
+#### 5b. Install Dependencies
+
+Frontend menggunakan package manager `pnpm`. Install semua dependencies:
 
 ```bash
-npm install
+pnpm install
 ```
 
-Setup environment file:
+**Apa yang terjadi:**
+- pnpm akan download ~500MB dependencies (pertama kali akan lama)
+- Ini membuat folder `node_modules/` yang berisi semua library yang dibutuhkan
+- Tunggu sampai selesai (tidak ada error di akhir)
+
+#### 5c. Konfigurasi Environment Frontend
+
+Buat file `.env.local`:
 
 ```bash
 # Windows (PowerShell)
-Copy-Item .env.local -Destination .env.local
+Copy-Item .env.example -Destination .env.local
 
 # Mac/Linux
-cp .env.local .env.local
+cp .env.example .env.local
 ```
 
-Jika tidak ada file `.env.local`, buat file baru:
+Edit file `.env.local` (buka dengan text editor) dan ganti isi dengan:
 
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_APP_NAME=System LLM
 ```
+
+**Penjelasan:**
+- `NEXT_PUBLIC_API_BASE_URL`: Alamat backend API (harus sama seperti Step 3)
+- `NEXT_PUBLIC_APP_NAME`: Nama aplikasi yang muncul di tab browser
 
 ### Step 6: Jalankan Frontend
 
+Di terminal yang sama (masih di folder `system-llm-frontend`), jalankan:
+
 ```bash
-npm run dev
+pnpm run dev
 ```
 
-Frontend akan berjalan di `http://localhost:3000`
+**Apa yang terjadi:**
+- Frontend development server akan start
+- Anda akan melihat log seperti:
+  ```
+  ▲ Next.js 15.x.x
+  - ready started server on 0.0.0.0:3000
+  ```
+- Server jalan di port 3000
+
+**Akses aplikasi:**
+Buka browser dan masuk ke: http://localhost:3000
+
+**Expected:**
+- Halaman login muncul
+- Jika tidak muncul, check terminal untuk error
+- Jangan tutup terminal ini (development server harus tetap running)
+
+**Cara stop:**
+Tekan `Ctrl + C` di terminal untuk stop frontend dev server
 
 ---
 
@@ -184,6 +343,90 @@ Setelah setup selesai, sistem dapat diakses melalui:
 Gunakan kredensial default:
 - Email: `admin@example.com`
 - Password: `admin123`
+
+---
+
+## Verifikasi Instalasi
+
+Setelah semua 6 step selesai, pastikan semuanya jalan dengan baik.
+
+### ✓ Step 1: Check Backend API
+
+Backend harus running di port 8000. Buka di browser:
+```
+http://localhost:8000/docs
+```
+
+**Expected:**
+- Halaman Swagger API documentation muncul
+- Tidak ada error di halaman
+- Anda bisa melihat berbagai API endpoint
+
+**Jika error:**
+Cek log backend:
+```bash
+docker-compose -f docker-compose.local.yml logs api
+```
+
+### ✓ Step 2: Check Frontend
+
+Frontend harus running di port 3000. Buka di browser:
+```
+http://localhost:3000
+```
+
+**Expected:**
+- Halaman login muncul
+- Ada field email dan password
+- Tidak ada error di halaman
+
+**Jika blank/error:**
+- Check terminal frontend untuk error message
+- Pastikan backend API URL benar di `.env.local`
+
+### ✓ Step 3: Check Database (PgAdmin)
+
+Akses admin database di:
+```
+http://localhost:5050
+```
+
+**Login:**
+- Email: `admin@admin.com`
+- Password: `admin`
+
+**Check tabel:**
+1. Di kiri, klik **Databases** > **system_llm**
+2. Klik **Schemas** > **public**
+3. Klik **Tables**
+
+**Harus ada tabel:**
+- `document` (untuk upload file)
+- `document_chunk` (untuk RAG embeddings)
+- `chat_session` (untuk chat history)
+- `user` (untuk user account)
+- `ai_model` (untuk LLM models)
+
+Jika tidak ada, berarti migration atau init.sql gagal.
+
+### ✓ Step 4: Login ke Aplikasi
+
+Buka http://localhost:3000 dan login dengan:
+```
+Email: admin@example.com
+Password: admin123
+```
+
+**Expected:**
+- Login berhasil
+- Dashboard atau main page muncul
+- Tidak ada error
+
+**Jika login gagal:**
+- Pastikan database migration selesai
+- Check apakah init.sql berhasil import
+
+---
 
 ## Perintah Umum
 
@@ -211,8 +454,173 @@ docker-compose -f docker-compose.local.yml exec api bash
 Ctrl + C
 
 # Build untuk production
-npm run build
+pnpm run build
 
 # Start development server
-npm run dev
+pnpm run dev
 ```
+
+---
+
+## Troubleshooting
+
+### Error: "env file .env.local not found"
+
+**Penyebab:** File `.env.local` belum dibuat di Step 2a
+
+**Solusi:**
+```bash
+# Cek file apa yang ada
+dir .env*
+
+# Jika belum ada .env.local, buat dari .env.example
+Copy-Item .env.example -Destination .env.local
+
+# Edit .env.local sesuai Step 2b, lalu coba lagi
+docker-compose -f docker-compose.local.yml up -d
+```
+
+### Error: "Cannot find path '.env.example'"
+
+**Penyebab:** Anda tidak di folder `system-llm-backend`
+
+**Solusi:**
+```bash
+cd system-llm-backend
+```
+
+Verify Anda di folder yang benar dengan melihat di terminal. Harus ada list file (termasuk `.env.example`).
+
+### Error: "docker: command not found" atau "docker-compose not found"
+
+**Penyebab:** Docker tidak terinstall atau tidak di PATH
+
+**Solusi:**
+1. Download Docker Desktop: https://www.docker.com/products/docker-desktop
+2. Install dan restart komputer
+3. Verify dengan: `docker --version`
+
+### Error: "port 5432 already in use" atau "port 8000 already in use"
+
+**Penyebab:** Ada proses lain yang pakai port yang sama
+
+**Solusi:**
+```bash
+# Stop semua Docker container
+docker-compose -f docker-compose.local.yml down
+
+# Coba start lagi
+docker-compose -f docker-compose.local.yml up -d
+```
+
+### Error: "UnicodeDecodeError" atau "invalid character in .env"
+
+**Penyebab:** File `.env` ada karakter yang tidak valid
+
+**Solusi:**
+1. Hapus file `.env`
+2. Buat ulang dari `.env.example`:
+   ```bash
+   Copy-Item .env.example -Destination .env
+   ```
+3. Edit dengan text editor yang benar (gunakan UTF-8 encoding)
+
+### Error: "pnpm: command not found"
+
+**Penyebab:** pnpm tidak terinstall globally
+
+**Solusi:**
+```bash
+npm install -g pnpm
+```
+
+Verify dengan: `pnpm --version`
+
+### Backend jalan tapi frontend tidak bisa connect
+
+**Penyebab:** `NEXT_PUBLIC_API_BASE_URL` di `.env.local` salah
+
+**Solusi:**
+1. Check `.env.local` di folder frontend
+2. Pastikan `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1` (sesuai dengan backend port)
+3. Save file dan restart frontend:
+   ```bash
+   # Ctrl + C untuk stop
+   pnpm run dev  # start lagi
+   ```
+
+### Database tidak ada tabel setelah migration
+
+**Penyebab:** Migration atau init.sql gagal
+
+**Solusi:**
+1. Check error:
+   ```bash
+   docker-compose -f docker-compose.local.yml logs api
+   ```
+2. Manual check database:
+   ```bash
+   docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "\dt"
+   ```
+3. Re-run migration:
+   ```bash
+   docker-compose -f docker-compose.local.yml exec api python -m alembic upgrade head
+   docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
+   ```
+
+### Login gagal (email/password tidak work)
+
+**Penyebab:** init.sql tidak diimport dengan benar
+
+**Solusi:**
+1. Check apakah user ada:
+   ```bash
+   docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT * FROM user LIMIT 1;"
+   ```
+2. Jika tidak ada, re-import:
+   ```bash
+   docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm < scripts/init.sql
+   ```
+
+### Error: "FATAL: password authentication failed for user"
+
+**Penyebab:** Database credentials di `.env.local` tidak sesuai dengan docker-compose config
+
+**Solusi:**
+
+1. Stop semua container:
+   ```bash
+   docker-compose -f docker-compose.local.yml down -v
+   ```
+   (Flag `-v` menghapus volume, termasuk database lama)
+
+2. Edit `.env.local` dan **PASTIKAN** database credentials **TEPAT**:
+   ```env
+   POSTGRES_USER=llm_user
+   POSTGRES_PASSWORD=llm_password_local
+   POSTGRES_DB=system_llm
+   DATABASE_URL=postgresql://llm_user:llm_password_local@postgres:5432/system_llm
+   ```
+
+3. Start lagi:
+   ```bash
+   docker-compose -f docker-compose.local.yml up -d
+   ```
+
+**Penting:** Username harus `llm_user` (bukan `postgres`) untuk LOCAL setup.
+
+### Still having issues?
+
+Collect info untuk debugging:
+```bash
+# 1. Docker status
+docker-compose -f docker-compose.local.yml ps
+
+# 2. Backend log
+docker-compose -f docker-compose.local.yml logs api --tail=50
+
+# 3. Check database connection
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT version();"
+```
+
+Kirimkan output ini ketika minta help.

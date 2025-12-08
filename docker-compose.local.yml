@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Docker Compose untuk local development dengan LocalStorage dan Local PostgreSQL
 # Usage: docker-compose -f docker-compose.local.yml up -d
 #
