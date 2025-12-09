@@ -8,7 +8,9 @@
 
 services:
   postgres:
-    image: postgres:15-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     container_name: system-llm-postgres-local
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-llm_user}
@@ -18,8 +20,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data_local:/var/lib/postgresql/data
-      # Skip pgvector init untuk LOCAL - akan dibuat via migration atau manual
-      # - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llm_user} -d ${POSTGRES_DB:-system_llm}"]
       interval: 10s

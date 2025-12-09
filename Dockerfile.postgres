@@ -1,0 +1,18 @@
+# PostgreSQL dengan pgvector extension
+FROM postgres:15-alpine
+
+# Install build tools dan pgvector
+RUN apk add --no-cache \
+    build-base \
+    postgresql-dev \
+    git \
+    && git clone --branch v0.5.1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
+    && cd /tmp/pgvector \
+    && make \
+    && make install \
+    && rm -rf /tmp/pgvector \
+    && apk del build-base postgresql-dev git
+
+# Script untuk auto-create extension saat startup
+RUN mkdir -p /docker-entrypoint-initdb.d
+COPY init-pgvector.sql /docker-entrypoint-initdb.d/01-init-pgvector.sql
