@@ -38,7 +38,11 @@ Sebelum memulai, pastikan sudah terinstall:
 
 4. **Node.js** (untuk frontend) → [Download](https://nodejs.org/)
    - Verifikasi dengan: `node --version`
-   - pnpm akan diinstall via npm di langkah frontend
+   - **PENTING: Setelah install Node.js, install pnpm dengan:**
+     ```bash
+     npm install -g pnpm
+     ```
+   - Verifikasi dengan: `pnpm --version`
 
 5. **Python 3.x** (untuk backend) → [Download](https://www.python.org/)
    - Verifikasi dengan: `python --version`
@@ -48,16 +52,21 @@ Sebelum memulai, pastikan sudah terinstall:
 
 ### Verifikasi Prerequisites
 
-Setelah install semua requirements, buka terminal/PowerShell dan check versi:
+Setelah install semua requirements, buka terminal/PowerShell **BARU** dan check versi:
 
 ```bash
 git --version
 docker --version
 node --version
+npm --version
+pnpm --version
 python --version
 ```
 
-Semua harus menampilkan versi, bukan "command not found".
+**Semua harus menampilkan versi, bukan "command not found".**
+
+**Jika `pnpm --version` error:**
+Jalankan: `npm install -g pnpm` (pastikan Node.js sudah ter-install dulu)
 
 ---
 
@@ -216,9 +225,7 @@ Untuk LOCAL development, **hanya perlu SATU API Key** saja. Pilih salah satu:
 1. **Pastikan Docker Desktop sudah dibuka** (aplikasi Docker Desktop harus running)
 2. **Pastikan file `.env.local` sudah dibuat dan dikonfigurasi** (Step 2a & 2b)
 3. **Verify file `.env.local` ada** di folder `system-llm-backend`
-
-**Note tentang pgvector:**
-- Sistem menggunakan **pgvector** - PostgreSQL extension untuk vector embeddings (AI embeddings untuk RAG/semantic search)
+4. **Verify file `init-pgvector.sql` ada** di root folder `system-llm-backend` (diperlukan untuk PostgreSQL setup)
 
 
 Pastikan Anda masih di folder `system-llm-backend`, kemudian jalankan:
@@ -258,38 +265,38 @@ docker-compose -f docker-compose.local.yml logs
 
 ### Step 4: Setup Database
 
-Database memerlukan 2 langkah setup (pgvector akan otomatis ter-install saat Docker startup):
+Import data awal ke database (struktur tabel dan admin user):
 
-#### 4a. Jalankan Database Migrations
-
-Database migrations membuat struktur tabel (schema) yang diperlukan:
-
-```bash
-docker-compose -f docker-compose.local.yml exec api python -m alembic upgrade head
+**Windows (PowerShell) - RECOMMENDED METHOD:**
+```powershell
+# Method 1: Copy file ke container dulu (paling reliable)
+docker cp scripts/init.sql system-llm-postgres-local:/init.sql
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -f /init.sql
 ```
 
-**Expected output:** Melihat log migration berjalan, tidak ada error.
+**Windows (PowerShell) - Alternative Method:**
+```powershell
+# Method 2: Gunakan Get-Content (jika Method 1 tidak work)
+Get-Content scripts/init.sql | docker-compose -f docker-compose.local.yml exec -T postgres psql -U llm_user -d system_llm
+```
 
-#### 4b. Import Admin User & AI Models
-
-Import data awal ke database:
-(PowerShell)
+**Mac/Linux:**
 ```bash
-type scripts/init.sql | docker-compose -f docker-compose.local.yml exec -T postgres psql -U llm_user -d system_llm
+cat scripts/init.sql | docker-compose -f docker-compose.local.yml exec -T postgres psql -U llm_user -d system_llm
 ```
 
 **Apa yang diimport:**
+- Struktur database lengkap (semua tabel)
 - Admin user: `admin@example.com` / Password: `admin123`
 - AI models: GPT-4, Claude, Gemini, dll
 - Chat config dan settings
-- Struktur database lengkap
 
-**Verifikasi selesai:**
+**Verifikasi berhasil:**
 ```bash
-docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT COUNT(*) as total_models FROM model;"
+docker-compose -f docker-compose.local.yml exec postgres psql -U llm_user -d system_llm -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
 ```
 
-Harus menampilkan angka (jumlah AI models, minimal 3).
+Harus menampilkan angka > 5 (minimal 5 tabel).
 
 ### Step 5: Setup Frontend
 
