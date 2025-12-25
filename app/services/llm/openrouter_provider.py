@@ -45,16 +45,29 @@ class OpenRouterProvider(BaseLLMProvider):
         Create ChatOpenAI client configured for OpenRouter.
         OpenRouter is OpenAI-compatible, so ChatOpenAI works seamlessly.
         """
+        # OpenRouter requires specific headers for proper authentication and rate limiting
+        default_headers = {
+            "HTTP-Referer": "http://localhost",  # Required: helps OpenRouter identify the application
+            "X-Title": "System LLM",  # Optional: identifies the application name
+        }
+
         client_config = {
             "model": self.model_name,
             "base_url": self.base_url,
+            "default_headers": default_headers,
             "model_kwargs": {},
             "temperature": 1
         }
 
-        # Add API key if provided
+        # Add API key - REQUIRED for OpenRouter authentication
         if self.api_key:
             client_config["api_key"] = self.api_key
+        else:
+            logger.warning(
+                "[OPENROUTER] No API key provided! "
+                "Please set OPENROUTER_API_KEY in .env.local or pass api_key parameter. "
+                "Without API key, OpenRouter requests will fail with 401 authentication error."
+            )
 
         return ChatOpenAI(**client_config)
 
