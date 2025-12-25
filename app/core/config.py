@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     GOOGLE_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    DEFAULT_LLM_MODEL: str = "gpt-5-mini"
+    DEFAULT_LLM_MODEL: str = "gpt-4-mini"
 
     # Cloud Storage Configuration
     STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
@@ -56,7 +56,10 @@ settings = Settings()
 # DEBUG: Log settings on startup
 print(f"[DEBUG] [Config] Settings initialized")
 print(f"[DEBUG] [Config] SECRET_KEY length: {len(settings.SECRET_KEY)}")
-print(f"[DEBUG] [Config] SECRET_KEY: {settings.SECRET_KEY}")
-print(f"[DEBUG] [Config] SECRET_KEY hex: {settings.SECRET_KEY.encode().hex()}")
 print(f"[DEBUG] [Config] DATABASE_URL: {settings.DATABASE_URL[:50]}...")
 print(f"[DEBUG] [Config] ALGORITHM: {settings.ALGORITHM}")
+print(f"[DEBUG] [Config] OPENAI_API_KEY loaded: {bool(settings.OPENAI_API_KEY)}")
+print(f"[DEBUG] [Config] ANTHROPIC_API_KEY loaded: {bool(settings.ANTHROPIC_API_KEY)}")
+print(f"[DEBUG] [Config] GOOGLE_API_KEY loaded: {bool(settings.GOOGLE_API_KEY)}")
+print(f"[DEBUG] [Config] OPENROUTER_API_KEY loaded: {bool(settings.OPENROUTER_API_KEY)}")
+print(f"[DEBUG] [Config] DEFAULT_LLM_MODEL: {settings.DEFAULT_LLM_MODEL}")
