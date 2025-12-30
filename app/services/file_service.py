@@ -100,19 +100,29 @@ class FileStorageProvider(ABC):
 class LocalFileStorage(FileStorageProvider):
     """Local file system storage provider"""
 
-    def __init__(self, base_path: str = "storage/uploads"):
+    def __init__(self, base_path: str = "file_to_ingest"):
         """
         Initialize local file storage.
 
         Args:
-            base_path: Base directory for storing files
+            base_path: Base directory for storing/reading files (default: file_to_ingest)
         """
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
-        logger.info(f"LocalFileStorage initialized with base_path: {self.base_path}")
+        logger.info(f"LocalFileStorage initialized with base_path: {self.base_path.absolute()}")
 
     def _get_file_path(self, file_id: str) -> Path:
-        """Get full file path for given file_id"""
+        """
+        Get full file path for given file_id/filename.
+
+        Handles both:
+        - UUID-based names (will append .pdf): "e5ecd1a2-1bc0-4b7f-9a90-8b522006e10c" -> ".../e5ecd1a2-1bc0-4b7f-9a90-8b522006e10c.pdf"
+        - Original filenames with extension: "4b tts-id v2.pdf" -> ".../4b tts-id v2.pdf"
+        """
+        # If filename already has .pdf extension, use it as-is
+        if file_id.endswith('.pdf'):
+            return self.base_path / file_id
+        # Otherwise append .pdf (for UUID-based names)
         return self.base_path / f"{file_id}.pdf"
 
     def save(self, file_id: str, content: bytes) -> str:
@@ -375,6 +385,7 @@ class GCSStorageProvider(FileStorageProvider):
 
         Uses larger chunks (10MB default) for faster throughput.
         Downloads full blob and streams in chunks (GCS doesn't support efficient range requests).
+        Includes retry logic and extended timeout for large files.
         """
         try:
             blob_name = self._get_blob_name(file_id)
@@ -384,16 +395,20 @@ class GCSStorageProvider(FileStorageProvider):
             # GCS library handles all optimizations internally
             logger.info(f"[GCSStorageProvider.stream] Starting download from GCS - file_id: {file_id}, blob: {blob_name}")
 
+            # Use extended timeout for large files (600 seconds = 10 minutes)
+            # This prevents timeout errors on large files or slow connections
+            download_timeout = 600  # 10-minute timeout (was 120 seconds)
+
             try:
-                full_content = blob.download_as_bytes(timeout=120)  # 2-minute timeout
+                full_content = blob.download_as_bytes(timeout=download_timeout)
             except Exception as gcs_error:
-                logger.error(f"[GCSStorageProvider.stream] GCS download failed - file_id: {file_id}, error: {str(gcs_error)}", exc_info=True)
+                logger.error(f"[GCSStorageProvider.stream] GCS download failed (timeout: {download_timeout}s) - file_id: {file_id}, error: {str(gcs_error)}", exc_info=True)
                 raise
 
             if not full_content:
                 raise FileNotFoundError(f"File is empty in GCS: {file_id}")
 
-            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS")
+            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS in {len(full_content) / (1024*1024):.2f}MB")
 
             # Stream in chunks for memory efficiency
             offset = 0
@@ -509,6 +524,9 @@ class FileService:
         """
         Get file content by document ID.
 
+        For LOCAL storage: uses original_filename to locate file
+        For GCS storage: uses UUID filename (document.filename)
+
         Args:
             file_id: UUID of the document
 
@@ -517,11 +535,20 @@ class FileService:
         """
         self.logger.info(f"[FileService.get_file_content] Starting - file_id: {file_id}")
         document = self.get_file(file_id)
-        self.logger.info(f"[FileService.get_file_content] Document found - filename: {document.filename}, file_path: {document.file_path}")
-        self.logger.info(f"[FileService.get_file_content] Storage provider: {self.storage.__class__.__name__}")
+
+        # Determine which filename to use based on storage type
+        storage_type = self.storage.__class__.__name__
+        if storage_type == "LocalFileStorage":
+            # For LOCAL storage, use original_filename from database
+            file_reference = document.original_filename
+            self.logger.info(f"[FileService.get_file_content] Document found - original_filename: {file_reference}, storage: {storage_type}")
+        else:
+            # For GCS and other cloud storage, use UUID filename
+            file_reference = document.filename
+            self.logger.info(f"[FileService.get_file_content] Document found - filename (UUID): {file_reference}, storage: {storage_type}")
 
         try:
-            content = self.storage.get(document.filename)
+            content = self.storage.get(file_reference)
             self.logger.info(f"[FileService.get_file_content] Successfully retrieved content - size: {len(content)} bytes")
             return content
         except Exception as e:
@@ -535,6 +562,9 @@ class FileService:
         This is the recommended method for downloads, especially for large files.
         It streams the file in chunks instead of loading everything into memory.
 
+        For LOCAL storage: uses original_filename to locate file
+        For GCS storage: uses UUID filename (document.filename)
+
         Args:
             file_id: UUID of the document
             chunk_size: Size of each chunk to stream (default 1MB)
@@ -544,11 +574,21 @@ class FileService:
         """
         self.logger.info(f"[FileService.stream_file_content] Starting - file_id: {file_id}, chunk_size: {chunk_size}")
         document = self.get_file(file_id)
-        self.logger.info(f"[FileService.stream_file_content] Document found - filename: {document.filename}, storage: {self.storage.__class__.__name__}")
+
+        # Determine which filename to use based on storage type
+        storage_type = self.storage.__class__.__name__
+        if storage_type == "LocalFileStorage":
+            # For LOCAL storage, use original_filename from database
+            file_reference = document.original_filename
+            self.logger.info(f"[FileService.stream_file_content] Document found - original_filename: {file_reference}, storage: {storage_type}")
+        else:
+            # For GCS and other cloud storage, use UUID filename
+            file_reference = document.filename
+            self.logger.info(f"[FileService.stream_file_content] Document found - filename (UUID): {file_reference}, storage: {storage_type}")
 
         try:
             # Stream from storage provider
-            for chunk in self.storage.stream(document.filename, chunk_size=chunk_size):
+            for chunk in self.storage.stream(file_reference, chunk_size=chunk_size):
                 yield chunk
             self.logger.info(f"[FileService.stream_file_content] Successfully streamed file - file_id: {file_id}")
         except Exception as e:
@@ -734,7 +774,7 @@ def initialize_storage_provider(config) -> FileStorageProvider:
         logger.info(f"[REASON] STORAGE_TYPE is '{storage_type}' (not 'gcs'), defaulting to local storage")
         try:
             logger.info("[INIT] Creating LocalFileStorage instance...")
-            storage_provider = LocalFileStorage()
+            storage_provider = LocalFileStorage(base_path=config.FILE_STORAGE_PATH)
             logger.info("[SUCCESS] LocalFileStorage initialized successfully")
         except Exception as e:
             logger.error(f"[ERROR] Failed to initialize LocalFileStorage: {str(e)}")

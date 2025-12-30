@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Cloud Storage Configuration
     STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
+    FILE_STORAGE_PATH: str = "file_to_ingest"  # Path to local file storage directory (relative or absolute)
     GCS_BUCKET_NAME: str = "system-llm-storage"
     GCS_PROJECT_ID: str = "system-llm"
     GCS_CREDENTIALS_PATH: Optional[str] = None  # Path to JSON credentials file (optional, uses ADC/IAM if None)
@@ -58,6 +59,8 @@ print(f"[DEBUG] [Config] Settings initialized")
 print(f"[DEBUG] [Config] SECRET_KEY length: {len(settings.SECRET_KEY)}")
 print(f"[DEBUG] [Config] DATABASE_URL: {settings.DATABASE_URL[:50]}...")
 print(f"[DEBUG] [Config] ALGORITHM: {settings.ALGORITHM}")
+print(f"[DEBUG] [Config] STORAGE_TYPE: {settings.STORAGE_TYPE}")
+print(f"[DEBUG] [Config] FILE_STORAGE_PATH: {settings.FILE_STORAGE_PATH}")
 print(f"[DEBUG] [Config] OPENAI_API_KEY loaded: {bool(settings.OPENAI_API_KEY)}")
 print(f"[DEBUG] [Config] ANTHROPIC_API_KEY loaded: {bool(settings.ANTHROPIC_API_KEY)}")
 print(f"[DEBUG] [Config] GOOGLE_API_KEY loaded: {bool(settings.GOOGLE_API_KEY)}")
