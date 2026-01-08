@@ -395,20 +395,37 @@ class GCSStorageProvider(FileStorageProvider):
             # GCS library handles all optimizations internally
             logger.info(f"[GCSStorageProvider.stream] Starting download from GCS - file_id: {file_id}, blob: {blob_name}")
 
+            # Check if blob exists BEFORE attempting download
+            logger.info(f"[GCSStorageProvider.stream] Checking blob existence: {blob_name}")
+            if not blob.exists():
+                logger.error(f"[GCSStorageProvider.stream] Blob does not exist in GCS: {blob_name}")
+                raise FileNotFoundError(f"File not found in GCS: {file_id} (blob path: gs://{self.bucket_name}/{blob_name})")
+
+            # Reload blob metadata to ensure size and other properties are current
+            logger.info(f"[GCSStorageProvider.stream] Reloading blob metadata...")
+            blob.reload()
+            logger.info(f"[GCSStorageProvider.stream] Blob metadata - size: {blob.size} bytes, updated: {blob.updated}")
+
             # Use extended timeout for large files (600 seconds = 10 minutes)
             # This prevents timeout errors on large files or slow connections
             download_timeout = 600  # 10-minute timeout (was 120 seconds)
 
             try:
+                logger.info(f"[GCSStorageProvider.stream] Downloading full content (timeout: {download_timeout}s)...")
                 full_content = blob.download_as_bytes(timeout=download_timeout)
+                logger.info(f"[GCSStorageProvider.stream] Download completed, received {len(full_content)} bytes")
             except Exception as gcs_error:
                 logger.error(f"[GCSStorageProvider.stream] GCS download failed (timeout: {download_timeout}s) - file_id: {file_id}, error: {str(gcs_error)}", exc_info=True)
                 raise
 
-            if not full_content:
-                raise FileNotFoundError(f"File is empty in GCS: {file_id}")
+            if not full_content or len(full_content) == 0:
+                logger.error(f"[GCSStorageProvider.stream] Downloaded content is empty! blob.size={blob.size}, actual_content_len={len(full_content)}")
+                raise FileNotFoundError(f"File is empty in GCS: {file_id} (blob metadata size: {blob.size} bytes, downloaded: {len(full_content)} bytes)")
 
-            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS in {len(full_content) / (1024*1024):.2f}MB")
+            if blob.size and len(full_content) != blob.size:
+                logger.warning(f"[GCSStorageProvider.stream] Size mismatch: blob.size={blob.size}, downloaded={len(full_content)}")
+
+            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS ({len(full_content) / (1024*1024):.2f}MB)")
 
             # Stream in chunks for memory efficiency
             offset = 0
