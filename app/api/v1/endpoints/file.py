@@ -384,15 +384,26 @@ async def download_file(
         def file_iterator():
             """Generator function to stream file content in chunks"""
             try:
+                chunk_count = 0
                 for chunk in file_service.stream_file_content(file_id_str, chunk_size=chunk_size):
+                    if not chunk:
+                        logger.warning(f"[download] Received empty chunk at index {chunk_count}")
+                        continue
+                    chunk_count += 1
                     yield chunk
-                logger.info(f"[download] Success: {file_id_str}")
+                logger.info(f"[download] Successfully streamed {chunk_count} chunks for {file_id_str}")
+            except FileNotFoundError as e:
+                logger.error(f"[download] File not found: {file_id_str} - {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"File not found: {str(e)}"
+                )
             except Exception as e:
                 logger.error(f"[download] Error streaming {file_id_str}: {str(e)}", exc_info=True)
-                raise
-
-        # Return file as streaming response with proper headers
-        # Note: Do NOT set Content-Length with StreamingResponse - it uses chunked transfer encoding
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error downloading file: {str(e)}"
+                )
 
         # Encode filename using RFC 5987 for proper Unicode support in HTTP headers
         # This handles filenames with special characters like emojis
@@ -402,6 +413,8 @@ async def download_file(
         # The quote() function will percent-encode the string
         safe_filename = quote(document.original_filename, safe='')
 
+        # Return file as streaming response with proper headers
+        # Note: Do NOT set Content-Length with StreamingResponse - it uses chunked transfer encoding
         return StreamingResponse(
             file_iterator(),
             media_type=document.mime_type or "application/pdf",

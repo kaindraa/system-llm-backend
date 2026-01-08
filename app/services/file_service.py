@@ -271,8 +271,19 @@ class GCSStorageProvider(FileStorageProvider):
             raise
 
     def _get_blob_name(self, file_id: str) -> str:
-        """Get GCS blob name for given file_id"""
-        return f"uploads/{file_id}.pdf"
+        """
+        Get GCS blob name for given file_id.
+
+        Handles both UUID-based names with/without .pdf extension:
+        - "abc123" -> "uploads/abc123.pdf"
+        - "abc123.pdf" -> "uploads/abc123.pdf"
+        """
+        # Remove .pdf if already present to avoid double extension
+        if file_id.endswith('.pdf'):
+            blob_name = f"uploads/{file_id}"
+        else:
+            blob_name = f"uploads/{file_id}.pdf"
+        return blob_name
 
     def save(self, file_id: str, content: bytes) -> str:
         """Save file to GCS with verification"""
