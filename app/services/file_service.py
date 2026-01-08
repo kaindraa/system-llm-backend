@@ -402,62 +402,80 @@ class GCSStorageProvider(FileStorageProvider):
             blob_name = self._get_blob_name(file_id)
             blob = self.bucket.blob(blob_name)
 
-            # Download full file from GCS with timeout handling
-            # GCS library handles all optimizations internally
-            logger.info(f"[GCSStorageProvider.stream] Starting download from GCS - file_id: {file_id}, blob: {blob_name}")
+            logger.info(f"[GCSStorageProvider.stream] ===== START DOWNLOAD =====")
+            logger.info(f"[GCSStorageProvider.stream] file_id: {file_id}")
+            logger.info(f"[GCSStorageProvider.stream] blob_name: {blob_name}")
+            logger.info(f"[GCSStorageProvider.stream] bucket: {self.bucket_name}")
 
             # Check if blob exists BEFORE attempting download
-            logger.info(f"[GCSStorageProvider.stream] Checking blob existence: {blob_name}")
-            if not blob.exists():
-                logger.error(f"[GCSStorageProvider.stream] Blob does not exist in GCS: {blob_name}")
+            logger.info(f"[GCSStorageProvider.stream] >>> Checking blob existence...")
+            blob_exists = blob.exists()
+            logger.info(f"[GCSStorageProvider.stream] >>> blob.exists() = {blob_exists}")
+
+            if not blob_exists:
+                logger.error(f"[GCSStorageProvider.stream] !!! BLOB NOT FOUND: gs://{self.bucket_name}/{blob_name}")
                 raise FileNotFoundError(f"File not found in GCS: {file_id} (blob path: gs://{self.bucket_name}/{blob_name})")
 
             # Reload blob metadata to ensure size and other properties are current
-            logger.info(f"[GCSStorageProvider.stream] Reloading blob metadata...")
-            blob.reload()
-            logger.info(f"[GCSStorageProvider.stream] Blob metadata - size: {blob.size} bytes, updated: {blob.updated}")
+            logger.info(f"[GCSStorageProvider.stream] >>> Reloading blob metadata...")
+            try:
+                blob.reload()
+                logger.info(f"[GCSStorageProvider.stream] >>> Blob metadata loaded:")
+                logger.info(f"[GCSStorageProvider.stream]     size: {blob.size} bytes")
+                logger.info(f"[GCSStorageProvider.stream]     updated: {blob.updated}")
+                logger.info(f"[GCSStorageProvider.stream]     content_type: {blob.content_type}")
+                logger.info(f"[GCSStorageProvider.stream]     generation: {blob.generation}")
+            except Exception as reload_error:
+                logger.error(f"[GCSStorageProvider.stream] !!! Error reloading metadata: {str(reload_error)}", exc_info=True)
+                raise
 
             # Use extended timeout for large files (600 seconds = 10 minutes)
-            # This prevents timeout errors on large files or slow connections
-            download_timeout = 600  # 10-minute timeout (was 120 seconds)
+            download_timeout = 600
 
             try:
-                logger.info(f"[GCSStorageProvider.stream] Downloading full content (timeout: {download_timeout}s)...")
+                logger.info(f"[GCSStorageProvider.stream] >>> Downloading from GCS (timeout: {download_timeout}s)...")
                 full_content = blob.download_as_bytes(timeout=download_timeout)
-                logger.info(f"[GCSStorageProvider.stream] Download completed, received {len(full_content)} bytes")
+                logger.info(f"[GCSStorageProvider.stream] >>> Download SUCCESS: {len(full_content)} bytes received")
             except Exception as gcs_error:
-                logger.error(f"[GCSStorageProvider.stream] GCS download failed (timeout: {download_timeout}s) - file_id: {file_id}, error: {str(gcs_error)}", exc_info=True)
+                logger.error(f"[GCSStorageProvider.stream] !!! GCS DOWNLOAD FAILED: {str(gcs_error)}", exc_info=True)
                 raise
 
             if not full_content or len(full_content) == 0:
-                logger.error(f"[GCSStorageProvider.stream] Downloaded content is empty! blob.size={blob.size}, actual_content_len={len(full_content)}")
-                raise FileNotFoundError(f"File is empty in GCS: {file_id} (blob metadata size: {blob.size} bytes, downloaded: {len(full_content)} bytes)")
+                logger.error(f"[GCSStorageProvider.stream] !!! EMPTY CONTENT: blob.size={blob.size}, downloaded={len(full_content)}")
+                raise FileNotFoundError(f"File is empty in GCS: {file_id}")
 
             if blob.size and len(full_content) != blob.size:
-                logger.warning(f"[GCSStorageProvider.stream] Size mismatch: blob.size={blob.size}, downloaded={len(full_content)}")
+                logger.warning(f"[GCSStorageProvider.stream] ??? SIZE MISMATCH: blob.size={blob.size}, downloaded={len(full_content)}")
 
-            logger.info(f"[GCSStorageProvider.stream] Downloaded {len(full_content)} bytes from GCS ({len(full_content) / (1024*1024):.2f}MB)")
+            logger.info(f"[GCSStorageProvider.stream] >>> Starting to yield chunks...")
+            logger.info(f"[GCSStorageProvider.stream]     total_size: {len(full_content)} bytes")
+            logger.info(f"[GCSStorageProvider.stream]     chunk_size: {chunk_size} bytes")
 
             # Stream in chunks for memory efficiency
             offset = 0
             total_size = len(full_content)
+            chunk_num = 0
 
             while offset < total_size:
                 chunk_end = min(offset + chunk_size, total_size)
                 chunk = full_content[offset:chunk_end]
 
                 if not chunk:
+                    logger.error(f"[GCSStorageProvider.stream] !!! Empty chunk at offset {offset}")
                     raise RuntimeError(f"Failed to read chunk at offset {offset}")
 
+                chunk_num += 1
+                logger.debug(f"[GCSStorageProvider.stream] >>> Yielding chunk {chunk_num}: {len(chunk)} bytes (offset {offset}-{chunk_end})")
                 yield chunk
                 offset = chunk_end
 
-            logger.info(f"[GCSStorageProvider.stream] Completed streaming file {file_id}")
+            logger.info(f"[GCSStorageProvider.stream] ===== COMPLETED: {chunk_num} chunks yielded =====")
 
         except FileNotFoundError:
+            logger.error(f"[GCSStorageProvider.stream] !!! FileNotFoundError: {file_id}")
             raise
         except Exception as e:
-            logger.error(f"[GCSStorageProvider.stream] Error streaming file {file_id}: {str(e)}", exc_info=True)
+            logger.error(f"[GCSStorageProvider.stream] !!! EXCEPTION: {str(e)}", exc_info=True)
             raise
 
 
@@ -600,27 +618,41 @@ class FileService:
         Yields:
             Chunks of file content as bytes
         """
-        self.logger.info(f"[FileService.stream_file_content] Starting - file_id: {file_id}, chunk_size: {chunk_size}")
-        document = self.get_file(file_id)
+        self.logger.info(f"[FileService.stream_file_content] ===== START =====")
+        self.logger.info(f"[FileService.stream_file_content] file_id: {file_id}")
+        self.logger.info(f"[FileService.stream_file_content] chunk_size: {chunk_size}")
+
+        try:
+            document = self.get_file(file_id)
+            self.logger.info(f"[FileService.stream_file_content] Document found: {document.original_filename}")
+            self.logger.info(f"[FileService.stream_file_content] document.filename: {document.filename}")
+            self.logger.info(f"[FileService.stream_file_content] document.file_size: {document.file_size}")
+        except Exception as e:
+            self.logger.error(f"[FileService.stream_file_content] !!! Failed to get file: {str(e)}", exc_info=True)
+            raise
 
         # Determine which filename to use based on storage type
         storage_type = self.storage.__class__.__name__
         if storage_type == "LocalFileStorage":
             # For LOCAL storage, use original_filename from database
             file_reference = document.original_filename
-            self.logger.info(f"[FileService.stream_file_content] Document found - original_filename: {file_reference}, storage: {storage_type}")
+            self.logger.info(f"[FileService.stream_file_content] Using LocalFileStorage - filename: {file_reference}")
         else:
             # For GCS and other cloud storage, use UUID filename
             file_reference = document.filename
-            self.logger.info(f"[FileService.stream_file_content] Document found - filename (UUID): {file_reference}, storage: {storage_type}")
+            self.logger.info(f"[FileService.stream_file_content] Using {storage_type} - file_reference: {file_reference}")
 
         try:
+            self.logger.info(f"[FileService.stream_file_content] >>> Calling storage.stream()")
+            chunk_count = 0
             # Stream from storage provider
             for chunk in self.storage.stream(file_reference, chunk_size=chunk_size):
+                chunk_count += 1
+                self.logger.debug(f"[FileService.stream_file_content] >>> Yielding chunk {chunk_count}: {len(chunk)} bytes")
                 yield chunk
-            self.logger.info(f"[FileService.stream_file_content] Successfully streamed file - file_id: {file_id}")
+            self.logger.info(f"[FileService.stream_file_content] ===== COMPLETED: {chunk_count} chunks =====")
         except Exception as e:
-            self.logger.error(f"[FileService.stream_file_content] Failed to stream file - file_id: {file_id}, error: {str(e)}", exc_info=True)
+            self.logger.error(f"[FileService.stream_file_content] !!! Error during streaming: {str(e)}", exc_info=True)
             raise
 
     def list_files(

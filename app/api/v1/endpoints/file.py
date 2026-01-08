@@ -362,12 +362,20 @@ async def download_file(
     **Requires authentication. All users can download any file.**
     """
     file_id_str = str(file_id)
+    logger.info(f"[download] ===== START DOWNLOAD =====")
+    logger.info(f"[download] file_id: {file_id_str}")
 
     try:
         file_service = FileService(db=db)
 
         # Get file metadata from database
+        logger.info(f"[download] >>> Getting file from database...")
         document = file_service.get_file(file_id_str)
+        logger.info(f"[download] >>> Document found:")
+        logger.info(f"[download]     original_filename: {document.original_filename}")
+        logger.info(f"[download]     filename (UUID): {document.filename}")
+        logger.info(f"[download]     file_size: {document.file_size}")
+        logger.info(f"[download]     status: {document.status}")
         logger.info(f"[download] Starting download: {document.original_filename} ({document.file_size} bytes)")
 
         # Calculate optimal chunk size based on file size (for faster streaming)

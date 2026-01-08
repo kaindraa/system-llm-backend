@@ -48,7 +48,7 @@ class Settings(BaseSettings):
             return [self.BACKEND_CORS_ORIGINS]
 
     class Config:
-        env_file = ".env.local"
+        env_file = ".env"  # Changed from .env.local to .env for flexibility
         case_sensitive = True
         extra = "ignore"  # Ignore extra fields from .env
 
