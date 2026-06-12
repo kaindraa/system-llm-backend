@@ -14,8 +14,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from app.models.document import Document, DocumentStatus
 from app.core.logging import get_logger
-from google.cloud import storage as gcs_storage
-from google.oauth2 import service_account
+# Note: google.cloud / supabase clients are imported lazily inside their
+# respective providers so each cloud SDK is only required when actually used.
 
 logger = get_logger(__name__)
 
@@ -222,6 +222,10 @@ class GCSStorageProvider(FileStorageProvider):
             credentials_path: Path to service account JSON credentials file
             project_id: GCP project ID
         """
+        # Lazy import: google-cloud-storage only needed when GCS provider is used.
+        from google.cloud import storage as gcs_storage
+        from google.oauth2 import service_account
+
         # Remove 'gs://' prefix if present
         if bucket_name.startswith('gs://'):
             bucket_name = bucket_name[5:]
@@ -477,6 +481,93 @@ class GCSStorageProvider(FileStorageProvider):
         except Exception as e:
             logger.error(f"[GCSStorageProvider.stream] !!! EXCEPTION: {str(e)}", exc_info=True)
             raise
+
+
+class SupabaseStorageProvider(FileStorageProvider):
+    """Supabase Storage provider (S3-compatible object storage).
+
+    Uses the service_role key to bypass RLS / storage policies, so authorization
+    stays in the application layer (same model as the GCS provider on Cloud Run).
+    """
+
+    def __init__(self, url: str, service_key: str, bucket: str):
+        if not url or not service_key:
+            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY are required for supabase storage")
+
+        # Lazy import so the dependency is only needed when this provider is used.
+        from supabase import create_client
+
+        self.bucket_name = bucket
+        self.client = create_client(url, service_key)
+        self._store = self.client.storage.from_(bucket)
+        logger.info(f"[SupabaseStorageProvider.__init__] Initialized with bucket: {bucket}")
+
+    def _get_object_path(self, file_id: str) -> str:
+        """Object path within the bucket. Mirrors GCS: uploads/<file_id>.pdf"""
+        if file_id.endswith('.pdf'):
+            return f"uploads/{file_id}"
+        return f"uploads/{file_id}.pdf"
+
+    def save(self, file_id: str, content: bytes) -> str:
+        """Upload file to Supabase Storage (upsert to allow overwrite)."""
+        path = self._get_object_path(file_id)
+        try:
+            self._store.upload(
+                path,
+                content,
+                {"content-type": "application/pdf", "upsert": "true"},
+            )
+            logger.info(f"[SupabaseStorageProvider.save] Saved {file_id} ({len(content)} bytes) to {self.bucket_name}/{path}")
+            return f"supabase://{self.bucket_name}/{path}"
+        except Exception as e:
+            logger.error(f"[SupabaseStorageProvider.save] Error saving {file_id}: {str(e)}", exc_info=True)
+            raise
+
+    def get(self, file_id: str) -> bytes:
+        """Download file content from Supabase Storage."""
+        path = self._get_object_path(file_id)
+        try:
+            content = self._store.download(path)
+            if not content:
+                raise FileNotFoundError(f"File not found in Supabase Storage: {file_id}")
+            logger.info(f"[SupabaseStorageProvider.get] Retrieved {file_id} ({len(content)} bytes)")
+            return content
+        except FileNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"[SupabaseStorageProvider.get] Error retrieving {file_id}: {str(e)}")
+            raise FileNotFoundError(f"File not found in Supabase Storage: {file_id} ({str(e)})")
+
+    def delete(self, file_id: str) -> None:
+        """Delete file from Supabase Storage."""
+        path = self._get_object_path(file_id)
+        try:
+            self._store.remove([path])
+            logger.info(f"[SupabaseStorageProvider.delete] Deleted {file_id}")
+        except Exception as e:
+            logger.error(f"[SupabaseStorageProvider.delete] Error deleting {file_id}: {str(e)}")
+            raise
+
+    def exists(self, file_id: str) -> bool:
+        """Check if file exists by listing its folder and matching the name."""
+        path = self._get_object_path(file_id)
+        folder, _, name = path.rpartition("/")
+        try:
+            items = self._store.list(folder, {"search": name})
+            return any(item.get("name") == name for item in items)
+        except Exception as e:
+            logger.error(f"[SupabaseStorageProvider.exists] Error checking {file_id}: {str(e)}")
+            return False
+
+    def stream(self, file_id: str, chunk_size: int = 10 * 1024 * 1024):
+        """Stream file in chunks. Supabase has no range API, so download then chunk."""
+        content = self.get(file_id)
+        total = len(content)
+        offset = 0
+        while offset < total:
+            end = min(offset + chunk_size, total)
+            yield content[offset:end]
+            offset = end
 
 
 # Global instance - will be initialized in main.py based on config
@@ -828,6 +919,23 @@ def initialize_storage_provider(config) -> FileStorageProvider:
             logger.info("[SUCCESS] GCSStorageProvider initialized successfully")
         except Exception as e:
             logger.error(f"[ERROR] Failed to initialize GCSStorageProvider: {str(e)}")
+            raise
+    elif storage_type == "supabase":
+        logger.info("[CHOICE] Selected: Supabase Storage Provider")
+        logger.info(f"[VALIDATION] SUPABASE_URL: {'PRESENT' if config.SUPABASE_URL else 'EMPTY'}")
+        logger.info(f"[VALIDATION] SUPABASE_SERVICE_KEY: {'PRESENT' if config.SUPABASE_SERVICE_KEY else 'EMPTY'}")
+        logger.info(f"[VALIDATION] SUPABASE_STORAGE_BUCKET: {config.SUPABASE_STORAGE_BUCKET}")
+
+        try:
+            logger.info("[INIT] Creating SupabaseStorageProvider instance...")
+            storage_provider = SupabaseStorageProvider(
+                url=config.SUPABASE_URL,
+                service_key=config.SUPABASE_SERVICE_KEY,
+                bucket=config.SUPABASE_STORAGE_BUCKET,
+            )
+            logger.info("[SUCCESS] SupabaseStorageProvider initialized successfully")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to initialize SupabaseStorageProvider: {str(e)}")
             raise
     else:
         logger.info(f"[CHOICE] Selected: Local File Storage Provider")

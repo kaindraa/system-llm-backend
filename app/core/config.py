@@ -30,11 +30,16 @@ class Settings(BaseSettings):
     DEFAULT_LLM_MODEL: str = "gpt-4-mini"
 
     # Cloud Storage Configuration
-    STORAGE_TYPE: str = "local"  # Options: "local", "gcs"
+    STORAGE_TYPE: str = "local"  # Options: "local", "gcs", "supabase"
     FILE_STORAGE_PATH: str = "file_to_ingest"  # Path to local file storage directory (relative or absolute)
     GCS_BUCKET_NAME: str = "system-llm-storage"
     GCS_PROJECT_ID: str = "system-llm"
     GCS_CREDENTIALS_PATH: Optional[str] = None  # Path to JSON credentials file (optional, uses ADC/IAM if None)
+
+    # Supabase Storage Configuration (required if STORAGE_TYPE=supabase)
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""  # service_role key (bypass RLS) — backend only, never expose
+    SUPABASE_STORAGE_BUCKET: str = "documents"
 
     @property
     def cors_origins(self) -> List[str]:
