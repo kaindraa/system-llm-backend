@@ -17,21 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Check if column exists, if not add it
-    from sqlalchemy import inspect
-    from sqlalchemy.engine import reflection
-
-    try:
-        # Try to add column, ignore if already exists
-        op.add_column('chat_config', sa.Column('prompt_analysis', sa.Text(), nullable=True))
-    except Exception as e:
-        # Column already exists or other error, just log
-        print(f"Column prompt_analysis: {str(e)}")
-        pass
+    # Idempotent at the SQL level: avoids aborting the transaction on Postgres
+    # when prompt_analysis was already added by revision a1b2c3d4e5f6.
+    op.execute("ALTER TABLE chat_config ADD COLUMN IF NOT EXISTS prompt_analysis TEXT")
 
 
 def downgrade() -> None:
-    try:
-        op.drop_column('chat_config', 'prompt_analysis')
-    except Exception:
-        pass
+    op.execute("ALTER TABLE chat_config DROP COLUMN IF EXISTS prompt_analysis")
