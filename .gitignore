@@ -41,6 +41,7 @@ venv.bak/
 # Environment Variables
 .env
 .env.local
+.env.remote
 .env.*.local
 
 # Database
