@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     # CORS
     BACKEND_CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:3001","http://localhost:8000"]'
+    # Regex for origins not known up-front (e.g. Vercel per-deployment URLs).
+    # Example: https://system-llm-frontend.*\.vercel\.app
+    BACKEND_CORS_ORIGIN_REGEX: str = ""
 
     # LLM Configuration
     OPENAI_API_KEY: str = ""
