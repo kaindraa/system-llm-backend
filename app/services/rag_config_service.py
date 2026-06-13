@@ -34,8 +34,8 @@ class ChatConfigService:
                 max_top_k=10,
                 similarity_threshold=0.7,
                 tool_calling_max_iterations=10,
-                tool_calling_enabled=True,
-                include_rag_instruction=True,
+                tool_calling_enabled=1,   # Integer column: 1=True, 0=False
+                include_rag_instruction=1,
             )
             db.add(config)
             db.commit()
