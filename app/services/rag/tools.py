@@ -247,7 +247,12 @@ class RAGToolFactory:
 
                 # ========== STEP 4: Call LLM to Refine Prompt ==========
                 logger.info("[REFINE_PROMPT] STEP 4: Calling LLM to refine prompt")
-                logger.info("[REFINE_PROMPT] Model: gpt-4.1-nano (fast & efficient)")
+                # Use the default model (lowest order) so refine keeps working when the
+                # model list changes; fall back to a known model if the table is empty.
+                from app.models.model import Model as _RefineModel
+                _default_model = self.db.query(_RefineModel).order_by(_RefineModel.order).first()
+                refine_model_id = _default_model.name if _default_model else "deepseek/deepseek-v4-flash"
+                logger.info(f"[REFINE_PROMPT] Model: {refine_model_id}")
 
                 import asyncio
                 logger.info("[REFINE_PROMPT] 🔄 Sending request to LLM...")
@@ -267,7 +272,7 @@ class RAGToolFactory:
                             try:
                                 return new_loop.run_until_complete(
                                     llm_service.generate_async(
-                                        model_id="gpt-4.1-nano",
+                                        model_id=refine_model_id,
                                         messages=messages
                                     )
                                 )
@@ -284,7 +289,7 @@ class RAGToolFactory:
                         try:
                             refined_prompt = loop.run_until_complete(
                                 llm_service.generate_async(
-                                    model_id="gpt-4.1-nano",
+                                    model_id=refine_model_id,
                                     messages=messages
                                 )
                             )
