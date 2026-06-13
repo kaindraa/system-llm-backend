@@ -188,7 +188,11 @@ class RAGToolFactory:
         from app.models.chat_config import ChatConfig
         config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
         refine_prompt_template = config.prompt_refine if config and config.prompt_refine else (
-            "Refine the student's question to be more specific and clear for better search results."
+            "You are a prompt refinement tool. "
+            "Your ONLY output must be the refined question itself — no explanations, no preamble, "
+            "no numbered options, no commentary. Output plain text only. "
+            "Rewrite the user's question to be specific, clear, and suitable for semantic search. "
+            "If the question is already clear, output it unchanged."
         )
 
         def refine_prompt_impl(original_prompt: str) -> Dict[str, Any]:
