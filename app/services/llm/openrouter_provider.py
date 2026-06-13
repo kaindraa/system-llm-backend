@@ -408,12 +408,12 @@ class OpenRouterProvider(BaseLLMProvider):
                 # No tool calls, stream LLM text response word-by-word
                 if response.content:
                     logger.debug("[OPENROUTER] LLM generated text response - streaming words")
-                    # Stream response word-by-word for real-time typing effect
+                    # Stream response word-by-word for real-time typing effect.
+                    # Keep each word's trailing whitespace (incl. newlines) so markdown
+                    # structure — headings (###), lists, code blocks — survives.
+                    import re
                     content = response.content
-                    words = content.split()
-                    for i, word in enumerate(words):
-                        # Add space after word except for last word
-                        token = word + (" " if i < len(words) - 1 else "")
+                    for token in re.findall(r"\S+\s*", content):
                         yield {
                             "type": "chunk",
                             "content": token
