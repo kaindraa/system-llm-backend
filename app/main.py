@@ -24,6 +24,22 @@ from app.services.llm import LLMService
 setup_logging()
 logger = get_logger(__name__)
 
+# Initialize Sentry BEFORE the app so the FastAPI/Starlette integrations attach.
+# A blank SENTRY_DSN (e.g. local dev) leaves Sentry disabled.
+if settings.SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.SENTRY_ENVIRONMENT,
+        send_default_pii=True,
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        profile_session_sample_rate=1.0,
+        profile_lifecycle="trace",
+        enable_logs=True,
+    )
+    logger.info("Sentry initialized (environment=%s)", settings.SENTRY_ENVIRONMENT)
+
 # Initialize FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -178,6 +194,15 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Failed to initialize LLM service: {str(e)}")
         raise
+
+    # Re-queue documents left mid-ingestion by a previous crash/deploy
+    try:
+        from app.services.rag.ingestion_runner import requeue_orphans
+        count = requeue_orphans()
+        logger.info(f"✅ Ingestion runner ready (requeued {count} orphaned document(s))")
+    except Exception as e:
+        logger.error(f"⚠️  Failed to requeue orphaned documents: {str(e)}")
+        # non-fatal: app can still serve requests
 
 # Shutdown event
 @app.on_event("shutdown")

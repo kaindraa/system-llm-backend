@@ -3,6 +3,9 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
+# Error monitoring (FastAPI/Starlette integration auto-enables; fastapi is pinned above)
+sentry-sdk==2.42.0
+
 # Database
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
@@ -26,6 +29,9 @@ itsdangerous==2.1.2
 
 # Utilities
 python-dateutil==2.8.2
+
+# Document processing / RAG ingestion
+pdfplumber==0.11.4
 
 # LLM Integration
 langchain-core>=1.0.0,<2.0.0

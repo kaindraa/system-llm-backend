@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: str = ""  # service_role key (bypass RLS) — backend only, never expose
     SUPABASE_STORAGE_BUCKET: str = "documents"
 
+    # Sentry error monitoring (empty DSN disables Sentry, e.g. local dev)
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from JSON string"""
