@@ -256,12 +256,19 @@ class OpenRouterProvider(BaseLLMProvider):
             iteration += 1
             logger.debug(f"[OPENROUTER] Tool calling iteration {iteration}/{max_iterations}")
 
+            # On the final allowed iteration, drop the tools so the model is forced to
+            # answer from the context it already gathered instead of looping forever.
+            is_last_iteration = iteration >= max_iterations
+            active_model = self._client if is_last_iteration else model_with_tools
+            if is_last_iteration:
+                logger.info("[OPENROUTER] Final iteration — calling without tools to force an answer")
+
             # Stream response token-by-token; accumulate to detect tool calls at end.
             # Text content and tool calls are mutually exclusive in OpenAI-compatible APIs,
             # so yielding text chunks while streaming is safe — tool call responses have no content.
             full_response = None
             try:
-                async for chunk in model_with_tools.astream(langchain_messages):
+                async for chunk in active_model.astream(langchain_messages):
                     if full_response is None:
                         full_response = chunk
                     else:
@@ -416,16 +423,10 @@ class OpenRouterProvider(BaseLLMProvider):
                         langchain_messages.append(tool_message)
 
             else:
-                # No tool calls — text was already streamed token-by-token above
+                # No tool calls — text was already streamed token-by-token above.
+                # (On the final iteration tools are disabled, so we always land here.)
                 logger.debug("[OPENROUTER] Tool calling loop completed - LLM response ready")
                 break
-
-        if iteration >= max_iterations:
-            logger.warning(f"[OPENROUTER] Tool calling reached max iterations ({max_iterations})")
-            yield {
-                "type": "chunk",
-                "content": "[Tool calling max iterations reached]"
-            }
 
     def _supports_tool_calling(self) -> bool:
         """

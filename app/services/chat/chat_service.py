@@ -432,6 +432,7 @@ class ChatService:
         sources_list = []
         real_messages_list = []  # Track for real_messages column (Option A: User original)
         tool_messages = []  # Track tool calls and results for real_messages
+        tools_used = []  # Track tools actually executed, for the "done" event (frontend "Completed · Used" badge)
 
         # Build real_messages (Option A: User message ORIGINAL)
         # Add system message to real_messages only if first message
@@ -597,6 +598,9 @@ class ChatService:
                             })
                             logger.debug(f"[REAL_MESSAGES] Added tool message for {tool_name}")
 
+                        if "refine_prompt" not in tools_used:
+                            tools_used.append("refine_prompt")
+
                         logger.info(f"[CHAT_SERVICE] 📤 YIELDING refine_prompt_result event")
                         yield event_to_yield
 
@@ -666,6 +670,9 @@ class ChatService:
                                         "status": "completed"
                                     }
                                 }
+                                if "semantic_search" not in tools_used:
+                                    tools_used.append("semantic_search")
+
                                 logger.info(f"[CHAT_SERVICE] 📤 YIELDING rag_search completion event")
                                 yield event_to_yield
 
@@ -799,7 +806,8 @@ class ChatService:
             "type": "done",
             "content": full_content,  # Send the string content, not the entire message object
             "sources": unique_sources if unique_sources else [],  # Include sources in done event
-            "tool_calls": []  # For future tool call support
+            # Tools actually executed this turn — drives the frontend "Completed · Used: ..." badge
+            "tool_calls": [{"name": name, "args": {}} for name in tools_used]
         }
         logger.info(f"[CHAT_SERVICE] 📤 YIELDING done event with {len(unique_sources)} sources")
         yield done_payload

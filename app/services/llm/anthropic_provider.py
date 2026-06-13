@@ -185,9 +185,14 @@ class AnthropicProvider(BaseLLMProvider):
             iteration += 1
             logger.debug(f"Tool calling iteration {iteration}/{max_iterations}")
 
+            # On the final allowed iteration, drop the tools so the model is forced to
+            # answer from the context it already gathered instead of looping forever.
+            is_last_iteration = iteration >= max_iterations
+            active_model = self._client if is_last_iteration else model_with_tools
+
             # Stream response token-by-token; accumulate to detect tool calls at end.
             full_response = None
-            async for chunk in model_with_tools.astream(langchain_messages):
+            async for chunk in active_model.astream(langchain_messages):
                 if full_response is None:
                     full_response = chunk
                 else:
@@ -348,13 +353,7 @@ class AnthropicProvider(BaseLLMProvider):
                         langchain_messages.append(tool_message)
 
             else:
-                # No tool calls — text was already streamed token-by-token above
+                # No tool calls — text was already streamed token-by-token above.
+                # (On the final iteration tools are disabled, so we always land here.)
                 logger.debug("Tool calling loop completed - LLM response ready")
                 break
-
-        if iteration >= max_iterations:
-            logger.warning(f"Tool calling reached max iterations ({max_iterations})")
-            yield {
-                "type": "chunk",
-                "content": "[Tool calling max iterations reached]"
-            }
