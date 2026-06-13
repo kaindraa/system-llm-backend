@@ -256,28 +256,39 @@ class OpenRouterProvider(BaseLLMProvider):
             iteration += 1
             logger.debug(f"[OPENROUTER] Tool calling iteration {iteration}/{max_iterations}")
 
-            # Get response from model (non-streaming first to detect tool calls)
+            # Stream response token-by-token; accumulate to detect tool calls at end.
+            # Text content and tool calls are mutually exclusive in OpenAI-compatible APIs,
+            # so yielding text chunks while streaming is safe — tool call responses have no content.
+            full_response = None
             try:
-                response = await model_with_tools.ainvoke(langchain_messages)
+                async for chunk in model_with_tools.astream(langchain_messages):
+                    if full_response is None:
+                        full_response = chunk
+                    else:
+                        full_response = full_response + chunk
+                    if chunk.content:
+                        yield {"type": "chunk", "content": chunk.content}
             except Exception as e:
-                logger.error(f"[OPENROUTER] Tool calling invocation failed: {e}. Falling back to non-tool mode.", exc_info=True)
-                # Fall back to regular streaming without tool calling
+                logger.error(f"[OPENROUTER] Streaming failed: {e}. Falling back to non-tool mode.", exc_info=True)
                 async for chunk in self.agenerate_stream(messages):
-                    yield {
-                        "type": "chunk",
-                        "content": chunk
-                    }
+                    yield {"type": "chunk", "content": chunk}
                 return
 
-            # Check if there are tool calls in the response
-            if response.tool_calls:
-                logger.info(f"[OPENROUTER] LLM generated {len(response.tool_calls)} tool call(s)")
+            if full_response is None:
+                break
+
+            # Check if there are tool calls in the accumulated response
+            if full_response.tool_calls:
+                logger.info(f"[OPENROUTER] LLM generated {len(full_response.tool_calls)} tool call(s)")
 
                 # Add assistant message with tool calls to message history
-                langchain_messages.append(response)
+                langchain_messages.append(AIMessage(
+                    content=full_response.content or "",
+                    tool_calls=full_response.tool_calls
+                ))
 
                 # Process each tool call
-                for tool_call in response.tool_calls:
+                for tool_call in full_response.tool_calls:
                     tool_name = tool_call["name"]
                     tool_input = tool_call["args"]
                     tool_id = tool_call["id"]
@@ -405,22 +416,7 @@ class OpenRouterProvider(BaseLLMProvider):
                         langchain_messages.append(tool_message)
 
             else:
-                # No tool calls, stream LLM text response word-by-word
-                if response.content:
-                    logger.debug("[OPENROUTER] LLM generated text response - streaming words")
-                    # Stream response word-by-word for real-time typing effect.
-                    # Keep each word's trailing whitespace (incl. newlines) so markdown
-                    # structure — headings (###), lists, code blocks — survives.
-                    import re
-                    content = response.content
-                    for token in re.findall(r"\S+\s*", content):
-                        yield {
-                            "type": "chunk",
-                            "content": token
-                        }
-                else:
-                    logger.debug("[OPENROUTER] Tool calling loop completed - no content to stream")
-
+                # No tool calls — text was already streamed token-by-token above
                 logger.debug("[OPENROUTER] Tool calling loop completed - LLM response ready")
                 break
 
