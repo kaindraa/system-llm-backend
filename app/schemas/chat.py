@@ -14,7 +14,8 @@ from enum import Enum
 class SessionStatus(str, Enum):
     """Chat session status"""
     ACTIVE = "active"
-    ANALYZED = "analyzed"  # Session has been analyzed
+    ENDED = "ended"        # Session closed, but not (successfully) analyzed
+    ANALYZED = "analyzed"  # Session closed and analysis is available
 
 
 class MessageRole(str, Enum):
@@ -287,11 +288,20 @@ class PromptInfo(BaseModel):
 
 
 class SessionAnalysisResponse(BaseModel):
-    """Simple session analysis with summary and comprehension level"""
+    """
+    Result of ending a chat session.
+
+    End Chat is best-effort: the session is always closed. Analysis fields are
+    populated only when analysis succeeded (`analysis_available=True`); otherwise
+    they are null and `status` is "ended".
+    """
     session_id: UUID = Field(..., description="Session ID")
-    summary: str = Field(..., description="Session summary paragraph")
-    comprehension_level: str = Field(..., description="Comprehension level: LOW, MEDIUM, HIGH")
-    analyzed_at: datetime = Field(..., description="When the analysis was performed")
+    status: str = Field(..., description="Session status: 'analyzed' or 'ended'")
+    analysis_available: bool = Field(..., description="Whether analysis was produced")
+    summary: Optional[str] = Field(None, description="Session summary paragraph")
+    comprehension_level: Optional[str] = Field(None, description="Comprehension level: LOW, MEDIUM, HIGH")
+    analyzed_at: Optional[datetime] = Field(None, description="When the analysis was performed")
+    detail: Optional[str] = Field(None, description="Reason analysis is unavailable, if any")
 
     class Config:
         from_attributes = True

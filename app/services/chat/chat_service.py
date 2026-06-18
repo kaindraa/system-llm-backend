@@ -5,6 +5,7 @@ Handles chat session management, message storage, and conversation flow.
 Integrates with LLM service for generating responses.
 """
 
+import json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -834,20 +835,48 @@ class ChatService:
         if not session:
             return None
 
+        # End Chat is best-effort: the session must ALWAYS be closed, even when
+        # analysis cannot be produced. Analysis failures (missing prompt, LLM
+        # error, malformed response) are logged loudly (captured by Sentry) but
+        # never raise to the caller or block ending the session.
+        now = datetime.utcnow()
+
+        def _finalize(*, summary=None, comprehension_level=None, analyzed=False, detail=None):
+            session.summary = summary
+            session.comprehension_level = comprehension_level
+            session.ended_at = now
+            if analyzed:
+                session.status = "analyzed"
+                session.analyzed_at = now
+            else:
+                session.status = "ended"
+                session.analyzed_at = None
+            self.db.commit()
+            self.db.refresh(session)
+            return {
+                "session_id": session.id,
+                "status": session.status,
+                "analysis_available": analyzed,
+                "summary": summary,
+                "comprehension_level": comprehension_level.upper() if comprehension_level else None,
+                "analyzed_at": session.analyzed_at.isoformat() if session.analyzed_at else None,
+                "detail": detail,
+            }
+
         if not session.messages:
-            raise ValueError(f"Session {session_id} has no messages to analyze")
+            logger.warning(f"[ANALYSIS] Session {session_id}: no messages; ending without analysis")
+            return _finalize(detail="Session has no messages to analyze")
 
         try:
-            # Get analysis prompt from ChatConfig
+            # Analysis prompt is a deliberate business-rule input — NO silent
+            # fallback. If it is not configured we end the session and surface
+            # the misconfiguration via logs/Sentry instead of guessing a prompt.
             chat_config = self.db.query(ChatConfig).filter(ChatConfig.id == 1).first()
             if not chat_config or not chat_config.prompt_analysis:
                 raise ValueError("Analysis prompt not configured in ChatConfig")
 
-            # Build analysis context
-            # Convert messages to readable format
+            # Build analysis context (conversation history rendered to text)
             messages_text = self._format_messages_for_analysis(session.messages)
-
-            # Prepare analysis prompt with conversation history
             analysis_context = [
                 {
                     "role": "system",
@@ -870,7 +899,6 @@ class ChatService:
             logger.info(f"[ANALYSIS] Session {session_id}: Raw LLM response received")
 
             # Parse LLM response as JSON
-            import json
             analysis_data = json.loads(analysis_json)
 
             # Extract summary and comprehension_level from LLM response
@@ -892,33 +920,17 @@ class ChatService:
             if comprehension_level_raw not in ["low", "medium", "high"]:
                 raise ValueError(f"Invalid comprehension level: {comprehension_level_raw}")
 
-            # Save to database columns
-            session.summary = summary
-            logger.info(f"[ANALYSIS] Saving to database with level: {comprehension_level_raw}")
-            # Store comprehension_level as lowercase string ("low", "medium", "high")
-            session.comprehension_level = comprehension_level_raw
-            session.status = "analyzed"  # Update status to analyzed
-            session.ended_at = datetime.utcnow()
-            session.analyzed_at = datetime.utcnow()
-
-            self.db.commit()
-            self.db.refresh(session)
-
             logger.info(f"[ANALYSIS] Session {session_id}: Analysis completed - Level: {comprehension_level_raw}")
-
-            return {
-                "session_id": session.id,
-                "summary": summary,
-                "comprehension_level": comprehension_level_raw.upper(),
-                "analyzed_at": datetime.utcnow().isoformat()
-            }
+            return _finalize(summary=summary, comprehension_level=comprehension_level_raw, analyzed=True)
 
         except json.JSONDecodeError as e:
-            logger.error(f"[ANALYSIS] Session {session_id}: Failed to parse LLM response as JSON: {str(e)}")
-            raise ValueError("LLM response could not be parsed as JSON")
+            logger.error(f"[ANALYSIS] Session {session_id}: LLM response not valid JSON; ending without analysis: {str(e)}", exc_info=True)
+            self.db.rollback()
+            return _finalize(detail="LLM response could not be parsed as JSON")
         except Exception as e:
-            logger.error(f"[ANALYSIS] Session {session_id}: Error during analysis: {str(e)}", exc_info=True)
-            raise
+            logger.error(f"[ANALYSIS] Session {session_id}: Analysis failed; ending without analysis: {str(e)}", exc_info=True)
+            self.db.rollback()
+            return _finalize(detail=f"Analysis failed: {str(e)}")
 
     def _format_messages_for_analysis(self, messages: List[Dict[str, Any]]) -> str:
         """

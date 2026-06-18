@@ -10,7 +10,8 @@ import enum
 class SessionStatus(str, enum.Enum):
     """Chat session status"""
     ACTIVE = "active"
-    ANALYZED = "analyzed"  # Session has been analyzed
+    ENDED = "ended"        # Session closed, but not (successfully) analyzed
+    ANALYZED = "analyzed"  # Session closed and analysis is available
 
 
 class ComprehensionLevel(str, enum.Enum):
