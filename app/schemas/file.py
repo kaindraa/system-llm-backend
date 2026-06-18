@@ -33,6 +33,10 @@ class FileDetailResponse(BaseModel):
     file_size: int = Field(..., description="File size in bytes")
     mime_type: str
     status: DocumentStatus
+    current_stage: Optional[str] = Field(None, description="Active ingestion stage (parsing/chunking/embedding/inserting/done)")
+    last_error: Optional[str] = Field(None, description="Error message of the last failed ingestion attempt")
+    retry_count: int = Field(0, description="Number of failed ingestion attempts")
+    cancel_requested: bool = Field(False, description="Whether a cancellation has been requested")
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
 

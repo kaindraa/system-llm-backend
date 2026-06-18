@@ -105,6 +105,15 @@ async def upload_file(
 
         logger.info(f"File uploaded by user {current_user.id}: {file.filename}")
 
+        # Auto-trigger ingestion (parse -> chunk -> embed -> index) in background.
+        # enqueue() is non-blocking; the actual work runs on the serial worker.
+        try:
+            from app.services.rag.ingestion_runner import enqueue
+            enqueue(str(document.id))
+        except Exception as e:
+            # Don't fail the upload if scheduling hiccups; startup sweep will retry.
+            logger.error(f"Failed to enqueue ingestion for {document.id}: {e}")
+
         return FileUploadResponse.model_validate(document)
 
     except HTTPException:
@@ -537,4 +546,110 @@ async def update_file_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update file status: {str(e)}"
+        )
+
+
+@router.post(
+    "/{file_id}/ingest",
+    response_model=FileDetailResponse,
+    summary="(Re)process a document into RAG chunks",
+)
+async def ingest_file(
+    file_id: UUID,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    """
+    Queue a document for ingestion (parse -> chunk -> embed -> index).
+
+    Works for re-processing too: existing chunks are replaced. Rejects if the
+    document is already being processed.
+
+    **Requires ADMIN role only.**
+    """
+    try:
+        file_service = FileService(db=db)
+        document = file_service.get_file(str(file_id))  # raises FileNotFoundError
+
+        if document.status == DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is already being processed",
+            )
+
+        # Reset tracking for a fresh manual attempt, then enqueue.
+        document.retry_count = 0
+        document.last_error = None
+        document.cancel_requested = False
+        document.status = DocumentStatus.UPLOADED
+        document.current_stage = None
+        db.commit()
+        db.refresh(document)
+
+        from app.services.rag.ingestion_runner import enqueue
+        enqueue(str(file_id))
+
+        logger.info(f"Ingestion queued by admin {current_admin.id}: {file_id}")
+        return FileDetailResponse.model_validate(document)
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with ID '{file_id}' not found",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error queuing ingestion: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to queue ingestion: {str(e)}",
+        )
+
+
+@router.post(
+    "/{file_id}/cancel",
+    response_model=FileDetailResponse,
+    summary="Request cancellation of an in-progress ingestion",
+)
+async def cancel_ingestion(
+    file_id: UUID,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+):
+    """
+    Request cooperative cancellation of a running ingestion. The worker checks
+    the flag between stages and stops at the next boundary (not instant).
+
+    **Requires ADMIN role only.**
+    """
+    try:
+        file_service = FileService(db=db)
+        document = file_service.get_file(str(file_id))  # raises FileNotFoundError
+
+        if document.status != DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only a document that is currently processing can be cancelled",
+            )
+
+        document.cancel_requested = True
+        db.commit()
+        db.refresh(document)
+
+        logger.info(f"Cancellation requested by admin {current_admin.id}: {file_id}")
+        return FileDetailResponse.model_validate(document)
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with ID '{file_id}' not found",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error requesting cancellation: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to request cancellation: {str(e)}",
         )
