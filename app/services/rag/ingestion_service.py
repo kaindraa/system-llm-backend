@@ -82,14 +82,14 @@ class IngestionService:
             # 2. Parse (stage=parsing)
             self._set_stage(document_id, IngestionStage.PARSING)
             self._check_cancel(document_id)
-            pages_text = self._extract_text_from_pdf(pdf_bytes)
+            pages_text = self._extract_text_from_pdf(document_id, pdf_bytes)
             if not pages_text:
                 raise ValueError("No extractable text found in PDF")
 
             # 3. Chunk (stage=chunking)
             self._set_stage(document_id, IngestionStage.CHUNKING)
             self._check_cancel(document_id)
-            chunks = self._chunk_text_with_pages(pages_text)
+            chunks = self._chunk_text_with_pages(document_id, pages_text)
             if not chunks:
                 raise ValueError("PDF produced zero chunks")
             full_text = "\n\n".join(pages_text[p] for p in sorted(pages_text))
@@ -100,7 +100,6 @@ class IngestionService:
 
             # 5. Insert (stage=inserting) — idempotent
             self._set_stage(document_id, IngestionStage.INSERTING)
-            self._check_cancel(document_id)
             self._replace_chunks(document_id, chunks, embeddings, full_text)
 
             # 6. Finalize
@@ -117,7 +116,7 @@ class IngestionService:
     # ------------------------------------------------------------------ #
     # Pipeline stages (ported from the notebook)
     # ------------------------------------------------------------------ #
-    def _extract_text_from_pdf(self, pdf_bytes: bytes) -> Dict[int, str]:
+    def _extract_text_from_pdf(self, document_id: str, pdf_bytes: bytes) -> Dict[int, str]:
         """Extract text per page: {page_number: text}. (notebook cell 8)"""
         import pdfplumber
 
@@ -128,18 +127,24 @@ class IngestionService:
                     f"PDF has {len(pdf.pages)} pages, exceeds limit of {self.MAX_PDF_PAGES}"
                 )
             for page_num, page in enumerate(pdf.pages, 1):
+                self._check_cancel(document_id)
                 extracted = page.extract_text()
                 if extracted:
                     pages_text[page_num] = extracted
         return pages_text
 
-    def _chunk_text_with_pages(self, pages_text: Dict[int, str]) -> List[Tuple[str, int]]:
+    def _chunk_text_with_pages(
+        self,
+        document_id: str,
+        pages_text: Dict[int, str]
+    ) -> List[Tuple[str, int]]:
         """Sentence-aware, word-counted chunking with page tracking. (notebook cell 10)"""
         chunk_size = self.CHUNK_SIZE
         overlap = self.CHUNK_OVERLAP
         chunks_with_pages: List[Tuple[str, int]] = []
 
         for page_num in sorted(pages_text.keys()):
+            self._check_cancel(document_id)
             page_content = pages_text[page_num]
             sentences = re.split(r'(?<=[.!?])\s+', page_content)
 
@@ -210,6 +215,7 @@ class IngestionService:
             ).delete(synchronize_session=False)
 
             for idx, ((content, page_number), embedding) in enumerate(zip(chunks, embeddings)):
+                self._check_cancel(document_id)
                 db.add(DocumentChunk(
                     document_id=document_id,
                     chunk_index=idx,
