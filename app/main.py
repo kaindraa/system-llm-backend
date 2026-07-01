@@ -198,8 +198,17 @@ async def startup_event():
     # Re-queue documents left mid-ingestion by a previous crash/deploy
     try:
         from app.services.rag.ingestion_runner import requeue_orphans
-        count = requeue_orphans()
-        logger.info(f"✅ Ingestion runner ready (requeued {count} orphaned document(s))")
+        recovery = requeue_orphans(
+            reenqueue=settings.INGESTION_REQUEUE_ORPHANS_ON_STARTUP
+        )
+        logger.info(
+            "✅ Ingestion runner ready "
+            "(reset=%s cancelled=%s requeued=%s auto_requeue=%s)",
+            recovery["reset"],
+            recovery["cancelled"],
+            recovery["requeued"],
+            settings.INGESTION_REQUEUE_ORPHANS_ON_STARTUP,
+        )
     except Exception as e:
         logger.error(f"⚠️  Failed to requeue orphaned documents: {str(e)}")
         # non-fatal: app can still serve requests

@@ -8,8 +8,10 @@ Responsibilities:
     app's own public URL so Fly's scale-to-zero proxy keeps the machine up
     ("still running -> still alive"). When the queue drains, pinging stops and
     the machine may scale to zero again. No-op when not running on Fly.
-  - Crash recovery: `requeue_orphans()` (called at startup) re-queues any
+  - Crash recovery: `requeue_orphans()` (called at startup) resets any
     document left mid-flight (status PROCESSING) by a previous crash/deploy.
+    Re-enqueueing is optional so a web restart does not automatically kick off
+    a heavy ingestion job and destabilize the instance again.
 
 This is intentionally infra-free (no Redis). The `document` table's status
 column is the source of truth; this runner is just the in-process dispatcher.
@@ -55,32 +57,74 @@ def enqueue(document_id: str) -> None:
     logger.info(f"[runner] enqueued {document_id} (queue size ~{_job_queue.qsize()})")
 
 
-def requeue_orphans() -> int:
+def requeue_orphans(reenqueue: bool = False) -> dict[str, int]:
     """
-    Reset documents stuck in PROCESSING (left by a crash/deploy) back to
-    UPLOADED and re-enqueue them. Returns count requeued. Call at startup.
+    Recover documents stuck in PROCESSING (left by a crash/deploy).
+
+    - If cancellation had already been requested, mark the document CANCELLED.
+    - Otherwise reset it back to UPLOADED.
+    - Only re-enqueue automatically when explicitly requested.
+
+    Returns a small summary dict. Call at startup.
     """
     db = SessionLocal()
     try:
         rows = db.execute(
-            sql_text("SELECT id FROM document WHERE status = 'PROCESSING'")
+            sql_text("""
+                SELECT id, cancel_requested
+                  FROM document
+                 WHERE status = 'PROCESSING'
+            """)
         ).fetchall()
-        ids = [str(r[0]) for r in rows]
-        if ids:
+        cancelled_ids = [str(row[0]) for row in rows if bool(row[1])]
+        reset_ids = [str(row[0]) for row in rows if not bool(row[1])]
+
+        if cancelled_ids:
             db.execute(
-                sql_text("""UPDATE document
-                               SET status = 'UPLOADED', current_stage = NULL
-                             WHERE status = 'PROCESSING'""")
+                sql_text("""
+                    UPDATE document
+                       SET status = 'CANCELLED',
+                           current_stage = NULL,
+                           cancel_requested = false
+                     WHERE status = 'PROCESSING'
+                       AND cancel_requested = true
+                """)
             )
+        if reset_ids:
+            db.execute(
+                sql_text("""
+                    UPDATE document
+                       SET status = 'UPLOADED',
+                           current_stage = NULL
+                     WHERE status = 'PROCESSING'
+                       AND (cancel_requested = false OR cancel_requested IS NULL)
+                """)
+            )
+        if cancelled_ids or reset_ids:
             db.commit()
     finally:
         db.close()
 
-    for doc_id in ids:
-        enqueue(doc_id)
-    if ids:
-        logger.info(f"[runner] requeued {len(ids)} orphaned document(s) after startup")
-    return len(ids)
+    requeued = 0
+    if reenqueue:
+        for doc_id in reset_ids:
+            enqueue(doc_id)
+        requeued = len(reset_ids)
+
+    if cancelled_ids or reset_ids:
+        logger.info(
+            "[runner] recovered orphaned documents after startup "
+            "(reset=%s cancelled=%s requeued=%s)",
+            len(reset_ids),
+            len(cancelled_ids),
+            requeued,
+        )
+
+    return {
+        "reset": len(reset_ids),
+        "cancelled": len(cancelled_ids),
+        "requeued": requeued,
+    }
 
 
 # --------------------------------------------------------------------------- #

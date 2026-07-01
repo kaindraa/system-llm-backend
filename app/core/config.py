@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     SENTRY_ENVIRONMENT: str = "production"
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
+    # Ingestion recovery on startup
+    # Default is safe for production: recover stale status, but do not restart
+    # heavy ingestion work automatically on web app boot.
+    INGESTION_REQUEUE_ORPHANS_ON_STARTUP: bool = False
+
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from JSON string"""
