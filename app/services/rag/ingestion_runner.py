@@ -22,6 +22,7 @@ import queue
 import threading
 import urllib.request
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.database import SessionLocal
 from sqlalchemy import text as sql_text
@@ -52,7 +53,8 @@ def enqueue(document_id: str) -> None:
     with _inflight_lock:
         global _inflight
         _inflight += 1
-        _ensure_heartbeat()
+        if settings.INGESTION_HEARTBEAT_ENABLED:
+            _ensure_heartbeat()
     _job_queue.put(str(document_id))
     logger.info(f"[runner] enqueued {document_id} (queue size ~{_job_queue.qsize()})")
 
@@ -170,6 +172,8 @@ def _self_url() -> str | None:
 
 def _ensure_heartbeat() -> None:
     global _heartbeat_thread
+    if not settings.INGESTION_HEARTBEAT_ENABLED:
+        return
     if _heartbeat_thread is not None and _heartbeat_thread.is_alive():
         return
     url = _self_url()

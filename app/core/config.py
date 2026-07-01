@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # Default is safe for production: recover stale status, but do not restart
     # heavy ingestion work automatically on web app boot.
     INGESTION_REQUEUE_ORPHANS_ON_STARTUP: bool = False
+    INGESTION_HEARTBEAT_ENABLED: bool = False
 
     @property
     def cors_origins(self) -> List[str]:
