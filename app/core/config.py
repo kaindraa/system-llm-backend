@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # heavy ingestion work automatically on web app boot.
     INGESTION_REQUEUE_ORPHANS_ON_STARTUP: bool = False
     INGESTION_HEARTBEAT_ENABLED: bool = False
+    INGESTION_POLL_INTERVAL_SECONDS: float = 2.0
 
     @property
     def cors_origins(self) -> List[str]:

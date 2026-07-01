@@ -45,6 +45,13 @@ echo "Starting FastAPI application..."
 # This tells Uvicorn to trust X-Forwarded-* headers from Cloud Run
 export FORWARDED_ALLOW_IPS="*"
 
+# If Fly process groups provide a command, run that instead of the default web
+# server. This lets the same image boot a dedicated worker process.
+if [ "$#" -gt 0 ]; then
+    echo "Starting custom process: $*"
+    exec "$@"
+fi
+
 # Start FastAPI with uvicorn
 # Use PORT env var (Cloud Run default 8080), fallback to 8000
 exec uvicorn app.main:app \

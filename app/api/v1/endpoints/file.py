@@ -105,14 +105,8 @@ async def upload_file(
 
         logger.info(f"File uploaded by user {current_user.id}: {file.filename}")
 
-        # Auto-trigger ingestion (parse -> chunk -> embed -> index) in background.
-        # enqueue() is non-blocking; the actual work runs on the serial worker.
-        try:
-            from app.services.rag.ingestion_runner import enqueue
-            enqueue(str(document.id))
-        except Exception as e:
-            # Don't fail the upload if scheduling hiccups; startup sweep will retry.
-            logger.error(f"Failed to enqueue ingestion for {document.id}: {e}")
+        # The dedicated worker process polls `UPLOADED` documents from the DB.
+        # Keep the web request fast; no heavy work starts inside the web process.
 
         return FileUploadResponse.model_validate(document)
 
@@ -577,7 +571,8 @@ async def ingest_file(
                 detail="Document is already being processed",
             )
 
-        # Reset tracking for a fresh manual attempt, then enqueue.
+        # Reset tracking for a fresh manual attempt. The worker process will
+        # pick this job up from the database queue.
         document.retry_count = 0
         document.last_error = None
         document.cancel_requested = False
@@ -585,9 +580,6 @@ async def ingest_file(
         document.current_stage = None
         db.commit()
         db.refresh(document)
-
-        from app.services.rag.ingestion_runner import enqueue
-        enqueue(str(file_id))
 
         logger.info(f"Ingestion queued by admin {current_admin.id}: {file_id}")
         return FileDetailResponse.model_validate(document)

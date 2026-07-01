@@ -185,23 +185,7 @@ async def startup_event():
         logger.error(f"❌ Failed to initialize LLM service: {str(e)}")
         raise
 
-    # Re-queue documents left mid-ingestion by a previous crash/deploy
-    try:
-        from app.services.rag.ingestion_runner import requeue_orphans
-        recovery = requeue_orphans(
-            reenqueue=settings.INGESTION_REQUEUE_ORPHANS_ON_STARTUP
-        )
-        logger.info(
-            "✅ Ingestion runner ready "
-            "(reset=%s cancelled=%s requeued=%s auto_requeue=%s)",
-            recovery["reset"],
-            recovery["cancelled"],
-            recovery["requeued"],
-            settings.INGESTION_REQUEUE_ORPHANS_ON_STARTUP,
-        )
-    except Exception as e:
-        logger.error(f"⚠️  Failed to requeue orphaned documents: {str(e)}")
-        # non-fatal: app can still serve requests
+    logger.info("✅ Web process ready (document ingestion is handled by worker process group)")
 
 # Shutdown event
 @app.on_event("shutdown")
