@@ -4,11 +4,13 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.logging import get_logger
 from app.models.user import User, UserRole
 from app.services.llm import LLMService
 
 # HTTP Bearer scheme for JWT token
 security = HTTPBearer()
+logger = get_logger(__name__)
 
 
 def get_llm_service(request: Request) -> LLMService:
@@ -32,44 +34,21 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    print(f"[DEBUG] [get_current_user] Credentials scheme: {credentials.scheme}")
-    print(f"[DEBUG] [get_current_user] Credentials type: {type(credentials)}")
-
     try:
         # Decode JWT token
         token = credentials.credentials
-        print(f"[DEBUG] ===== JWT Verification Start =====")
-        print(f"[DEBUG] Token length: {len(token)}")
-        print(f"[DEBUG] Token first 50 chars: {token[:50]}...")
-        print(f"[DEBUG] Token last 20 chars: ...{token[-20:]}")
-        print(f"[DEBUG] SECRET_KEY length: {len(settings.SECRET_KEY)}")
-        print(f"[DEBUG] SECRET_KEY: {settings.SECRET_KEY}")
-        print(f"[DEBUG] SECRET_KEY hex: {settings.SECRET_KEY.encode().hex()}")
-        print(f"[DEBUG] ALGORITHM: {settings.ALGORITHM}")
-
-        # Try to decode without verification first to inspect payload
-        try:
-            unverified_payload = jwt.get_unverified_claims(token)
-            print(f"[DEBUG] Unverified payload: {unverified_payload}")
-        except Exception as e:
-            print(f"[DEBUG] Could not decode unverified payload: {str(e)}")
-
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=[settings.ALGORITHM]
         )
-        print(f"[DEBUG] Token decoded successfully. Payload: {payload}")
         user_id: str = payload.get("user_id")
 
         if user_id is None:
-            print(f"[DEBUG] No user_id in token payload")
             raise credentials_exception
 
     except JWTError as e:
-        print(f"[DEBUG] JWTError: {str(e)}")
-        print(f"[DEBUG] JWTError type: {type(e).__name__}")
-        print(f"[DEBUG] ===== JWT Verification Failed =====")
+        logger.warning("JWT validation failed: %s", type(e).__name__)
         raise credentials_exception
 
     # Get user from database

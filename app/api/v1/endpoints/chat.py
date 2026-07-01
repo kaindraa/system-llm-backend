@@ -56,19 +56,6 @@ async def create_chat_session(
     **Student only.**
     """
     try:
-        # DEBUG: Log incoming request
-        logger.info(f"[CREATE_SESSION] Request received from user {current_user.id}")
-        logger.info(f"[CREATE_SESSION] Request data: model_id={request.model_id}, title={request.title}, prompt_id={request.prompt_id}")
-
-        # Log all prompt fields in detail
-        logger.info("=" * 80)
-        logger.info("[CREATE_SESSION] PROMPT CONFIGURATION DETAILS:")
-        logger.info(f"  prompt_general: {request.prompt_general if request.prompt_general else '(not provided)'}")
-        logger.info(f"  task: {request.task if request.task else '(not provided)'}")
-        logger.info(f"  persona: {request.persona if request.persona else '(not provided)'}")
-        logger.info(f"  mission_objective: {request.mission_objective if request.mission_objective else '(not provided)'}")
-        logger.info("=" * 80)
-
         chat_service = ChatService(db=db, llm_service=llm_service)
 
         session = chat_service.create_session(
@@ -81,9 +68,6 @@ async def create_chat_session(
             persona=request.persona,
             mission_objective=request.mission_objective
         )
-
-        # DEBUG: Log created session
-        logger.info(f"[CREATE_SESSION] Created session {session.id} with prompt_id={session.prompt_id}")
 
         return session
 
@@ -331,10 +315,6 @@ async def send_message(
         try:
             chat_service = ChatService(db=db, llm_service=llm_service)
 
-            logger.info(
-                f"User {current_user.email} sending streaming message to session {session_id}"
-            )
-
             # Get session to determine which model/provider is being used
             # Use eager loading to fetch model relationship
             from app.models.chat_session import ChatSession
@@ -358,9 +338,7 @@ async def send_message(
                     "google": settings.GOOGLE_API_KEY,
                 }
                 api_key = api_key_mapping.get(provider_name)
-                logger.info(f"Using {provider_name} provider with API key")
 
-            event_count = 0
             async for event in chat_service.send_message_stream(
                 session_id=session_id,
                 user_id=current_user.id,
@@ -368,54 +346,36 @@ async def send_message(
                 api_key=api_key,
                 use_rag=True  # Enable RAG by default - LLM decides if it needs to search
             ):
-                event_count += 1
                 event_type = event.get("type", "UNKNOWN")
                 # Normalize event_type: strip whitespace and convert to lowercase for comparison
                 event_type_normalized = event_type.strip().lower() if isinstance(event_type, str) else str(event_type).strip().lower()
                 content = event.get("content", {})
 
-                # DEBUG: Log event type for analysis
-                logger.info(f"[ENDPOINT] DEBUG: event_type raw = '{repr(event_type)}', normalized = '{event_type_normalized}'")
-
-                logger.info(f"[ENDPOINT] Event #{event_count} received from chat_service: type='{event_type}'")
-                logger.debug(f"[ENDPOINT] Event content: {str(content)[:100]}...")
-
                 if event_type_normalized == "user_message":
                     yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
                 elif event_type_normalized == "refine_prompt":
                     # Refine prompt tool is being called (TAHAP 1 - LLM decide)
-                    logger.info(f"[SSE] Forwarding refine_prompt event: {content}")
                     yield f"event: refine_prompt\ndata: {json.dumps(content)}\n\n"
                 elif event_type_normalized == "refine_prompt_result":
                     # Refine prompt tool result (TAHAP 2 - tool executed)
-                    logger.info(f"[SSE] Forwarding refine_prompt_result event: {content}")
                     yield f"event: refine_prompt_result\ndata: {json.dumps(content)}\n\n"
                 elif event_type_normalized == "rag_search":
                     # RAG tool call event
-                    logger.info(f"[SSE] Forwarding rag_search event: {content}")
                     yield f"event: rag_search\ndata: {json.dumps(content)}\n\n"
                 elif event_type_normalized == "rag_search_result":
                     # RAG tool result event
-                    logger.info(f"[SSE] Forwarding rag_search_result event: {content}")
                     yield f"event: rag_search_result\ndata: {json.dumps(content)}\n\n"
                 elif event_type_normalized == "chunk":
                     # Text chunk from LLM response
                     yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"
                 elif event_type_normalized == "done":
                     # Final response with sources and tool_calls
-                    # event dict structure: {"type": "done", "content": {...}, "sources": [...], "tool_calls": [...]}
-                    logger.info(f"[SSE] 🎯 ENTER DONE BLOCK - Full event: {event}")
-                    logger.info(f"[SSE] 🎯 event.get('sources'): {event.get('sources', [])}")
-
                     done_response = {
                         "type": "done",
                         "content": content,  # assistant_message
                         "sources": event.get("sources", []),  # ← Include sources!
                         "tool_calls": event.get("tool_calls", [])  # ← Include tool_calls!
                     }
-                    logger.info(f"[SSE] 🎯 done_response to be sent: {done_response}")
-                    logger.info(f"[SSE] Forwarding done event with {len(event.get('sources', []))} sources")
-                    logger.info(f"[SSE] 🎯 SSE payload: event: done\\ndata: {json.dumps(done_response)}\\n\\n")
                     yield f"event: done\ndata: {json.dumps(done_response)}\n\n"
 
         except ValueError as e:

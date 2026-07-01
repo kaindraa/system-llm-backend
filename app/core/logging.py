@@ -83,6 +83,21 @@ def setup_logging():
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
+    # Production chat/auth flows were dominated by verbose per-event logging.
+    # Keep these detailed traces available only in debug mode.
+    if not settings.DEBUG:
+        noisy_loggers = [
+            "system_llm.app.api.v1.endpoints.chat",
+            "system_llm.app.services.chat.chat_service",
+            "system_llm.app.services.rag.tools",
+            "system_llm.app.services.llm.openai_provider",
+            "system_llm.app.services.llm.anthropic_provider",
+            "system_llm.app.services.llm.google_provider",
+            "system_llm.app.services.llm.openrouter_provider",
+        ]
+        for logger_name in noisy_loggers:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+
     logger.info("=" * 60)
     logger.info(f"Logging system initialized - Level: {logging.getLevelName(log_level)}")
     logger.info(f"Log files location: {LOGS_DIR.absolute()}")

@@ -314,16 +314,6 @@ class ChatService:
         # RAG instruction is now included in prompt_general (Teacher's Specific Prompt)
         # No additional RAG instruction appended here
 
-        # Log the complete concatenated system prompt
-        if system_content:
-            logger.info(f"[CONTEXT] Session {session.id} - Building conversation context")
-            logger.info("=" * 100)
-            logger.info("[FINAL SYSTEM PROMPT (Concatenated)]:")
-            logger.info("-" * 100)
-            logger.info(system_content)
-            logger.info("-" * 100)
-            logger.info("=" * 100)
-
         if system_content:
             context.append({
                 "role": "system",
@@ -424,10 +414,6 @@ class ChatService:
             "content": message_content
         })
 
-        logger.info(
-            f"Session {session_id}: Streaming message (rag={use_rag}, context: {len(conversation_context)} msgs)"
-        )
-
         # Initialize variables
         full_content = ""
         sources_list = []
@@ -463,25 +449,17 @@ class ChatService:
                 provider = self.llm_service.get_provider(str(session.model_id), api_key=api_key)
 
                 # Use tool calling with RAG
-                provider_event_count = 0
                 async for event in provider.agenerate_stream_with_tools(
                     messages=conversation_context,
                     tools=rag_tools
                 ):
-                    provider_event_count += 1
                     event_type = event.get("type")
                     event_content = event.get("content")
-
-                    logger.info(f"[CHAT_SERVICE] Provider event #{provider_event_count}: type='{event_type}'")
-                    if event_type in ["tool_call", "refine_prompt", "refine_prompt_result", "rag_search", "rag_search_result"]:
-                        logger.info(f"[CHAT_SERVICE] IMPORTANT EVENT #{provider_event_count}: type='{event_type}', content={event_content}")
 
                     if event_type == "tool_call":
                         # LLM is calling a tool
                         tool_name = event_content.get("tool_name")
                         tool_input = event_content.get("tool_input", {})
-
-                        logger.info(f"[TOOL_CALL] Tool '{tool_name}' called with input: {tool_input}")
 
                         # IMPORTANT: Transform generic tool_call events to specific event types
                         # This is needed because some providers (OpenAI) only emit generic "tool_call" events
@@ -503,7 +481,6 @@ class ChatService:
                                     "status": "refining"
                                 }
                             }
-                            logger.info(f"[CHAT_SERVICE] 📤 YIELDING refine_prompt event")
                             yield event_to_yield
                         elif tool_name == "semantic_search":
                             # Extract query from tool_input (handle different possible formats)
@@ -512,8 +489,6 @@ class ChatService:
                             else:
                                 query = str(tool_input) if tool_input else ""
 
-                            logger.info(f"[CHAT_SERVICE] TRANSFORMING tool_call → rag_search event")
-                            logger.info(f"[RAG_SEARCH_EVENT] Yielding rag_search event with query: '{query}'")
                             # Forward the event before tool execution (TAHAP 1)
                             yield {
                                 "type": "rag_search",
@@ -524,7 +499,6 @@ class ChatService:
                             }
                         else:
                             # Default for other tools
-                            logger.info(f"[CHAT_SERVICE] Generic tool_call for: {tool_name}")
                             yield {
                                 "type": "tool_call",
                                 "content": {
@@ -538,9 +512,6 @@ class ChatService:
                         tool_name = event_content.get("tool_name")
                         result = event_content.get("result")
                         error = event_content.get("error")
-
-                        logger.info(f"[CHAT_SERVICE] 📥 Received refine_prompt_result from provider")
-                        logger.info(f"[CHAT_SERVICE] Result: {result}, Error: {error}")
 
                         if error:
                             logger.warning(f"[REFINE_PROMPT_RESULT] Tool {tool_name} error: {error}")
@@ -558,7 +529,6 @@ class ChatService:
                                 original = result.get("original", "")
                                 refined = result.get("refined", "")
                                 success = result.get("success", True)
-                                logger.info(f"[REFINE_PROMPT_RESULT] '{original}' → '{refined}'")
                             else:
                                 original = str(result)
                                 refined = str(result)
@@ -602,7 +572,6 @@ class ChatService:
                         if "refine_prompt" not in tools_used:
                             tools_used.append("refine_prompt")
 
-                        logger.info(f"[CHAT_SERVICE] 📤 YIELDING refine_prompt_result event")
                         yield event_to_yield
 
                     elif event_type == "rag_search_result":
@@ -611,22 +580,14 @@ class ChatService:
                         result = event_content.get("result")
                         error = event_content.get("error")
 
-                        logger.info(f"[CHAT_SERVICE] 📥 Received rag_search_result from provider")
-                        logger.info(f"[CHAT_SERVICE] Tool: {tool_name}, Error: {error}")
-                        logger.info(f"[CHAT_SERVICE] Full result object: {result}")
-                        logger.info(f"[CHAT_SERVICE] Result type: {type(result)}, Result keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
-
                         if error:
                             logger.warning(f"Tool {tool_name} error: {error}")
                         else:
                             results_count = result.get('count', 0) if isinstance(result, dict) else 0
-                            logger.info(f"[CHAT_SERVICE] Tool {tool_name} returned {results_count} results")
 
                             # Extract sources from tool result
                             if isinstance(result, dict):
                                 tool_sources = result.get("sources", [])
-                                logger.info(f"[CHAT_SERVICE] Extracted {len(tool_sources)} sources from tool result")
-                                logger.info(f"[CHAT_SERVICE] Tool sources: {tool_sources}")
                                 sources_list.extend(tool_sources)
 
                                 # Add to real_messages (Option A) - CHUNKS ARE HERE!
@@ -674,7 +635,6 @@ class ChatService:
                                 if "semantic_search" not in tools_used:
                                     tools_used.append("semantic_search")
 
-                                logger.info(f"[CHAT_SERVICE] 📤 YIELDING rag_search completion event")
                                 yield event_to_yield
 
                     elif event_type == "tool_result":
@@ -682,10 +642,6 @@ class ChatService:
                         tool_name = event_content.get("tool_name")
                         result = event_content.get("result")
                         error = event_content.get("error")
-
-                        logger.info(f"[CHAT_SERVICE] 📥 Received tool_result event (fallback)")
-                        logger.info(f"[CHAT_SERVICE] Tool: {tool_name}, Error: {error}")
-                        logger.info(f"[CHAT_SERVICE] Result: {result}")
 
                         if error:
                             logger.warning(f"Tool {tool_name} error: {error}")
@@ -695,8 +651,6 @@ class ChatService:
                             # Also extract sources for semantic_search tool in tool_result event
                             if tool_name == "semantic_search" and isinstance(result, dict):
                                 tool_sources = result.get("sources", [])
-                                logger.info(f"[CHAT_SERVICE] 📌 TOOL_RESULT: Extracted {len(tool_sources)} sources from semantic_search")
-                                logger.info(f"[CHAT_SERVICE] Sources: {tool_sources}")
                                 sources_list.extend(tool_sources)
 
                     elif event_type == "chunk":
@@ -771,11 +725,8 @@ class ChatService:
 
         # Append to interaction_messages
         session.interaction_messages.extend(interaction_messages_to_save)
-        logger.info(f"[INTERACTION_MESSAGES] Saved {len(interaction_messages_to_save)} messages")
-
         # REAL_MESSAGES (Full format with tools for Option A)
         session.real_messages.extend(real_messages_list)
-        logger.info(f"[REAL_MESSAGES] Saved {len(real_messages_list)} messages (chunks preserved in ToolMessages)")
 
         # LEGACY: Keep messages column for backward compatibility
         if system_message and len(session.messages) == 0:
@@ -795,13 +746,6 @@ class ChatService:
         self.db.commit()
         self.db.refresh(session)
 
-        logger.info(
-            f"Session {session_id}: Streaming completed"
-            f" | interaction_messages: {len(session.interaction_messages)}"
-            f" | real_messages: {len(session.real_messages)}"
-            f" | sources: {len(unique_sources)}"
-        )
-
         # Yield done signal with assistant message and sources
         done_payload = {
             "type": "done",
@@ -810,7 +754,6 @@ class ChatService:
             # Tools actually executed this turn — drives the frontend "Completed · Used: ..." badge
             "tool_calls": [{"name": name, "args": {}} for name in tools_used]
         }
-        logger.info(f"[CHAT_SERVICE] 📤 YIELDING done event with {len(unique_sources)} sources")
         yield done_payload
 
     async def analyze_session(

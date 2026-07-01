@@ -14,7 +14,9 @@ engine = create_engine(
     connect_args={
         "connect_timeout": 10,
     },
-    echo=settings.DEBUG      # Log SQL queries in debug mode
+    # Keep SQL echo disabled in-app; production request latency is more important
+    # than verbose query logging, and logger-based diagnostics remain available.
+    echo=False
 )
 
 # Session factory

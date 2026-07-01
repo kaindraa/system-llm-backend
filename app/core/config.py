@@ -66,16 +66,3 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra fields from .env
 
 settings = Settings()
-
-# DEBUG: Log settings on startup
-print(f"[DEBUG] [Config] Settings initialized")
-print(f"[DEBUG] [Config] SECRET_KEY length: {len(settings.SECRET_KEY)}")
-print(f"[DEBUG] [Config] DATABASE_URL: {settings.DATABASE_URL[:50]}...")
-print(f"[DEBUG] [Config] ALGORITHM: {settings.ALGORITHM}")
-print(f"[DEBUG] [Config] STORAGE_TYPE: {settings.STORAGE_TYPE}")
-print(f"[DEBUG] [Config] FILE_STORAGE_PATH: {settings.FILE_STORAGE_PATH}")
-print(f"[DEBUG] [Config] OPENAI_API_KEY loaded: {bool(settings.OPENAI_API_KEY)}")
-print(f"[DEBUG] [Config] ANTHROPIC_API_KEY loaded: {bool(settings.ANTHROPIC_API_KEY)}")
-print(f"[DEBUG] [Config] GOOGLE_API_KEY loaded: {bool(settings.GOOGLE_API_KEY)}")
-print(f"[DEBUG] [Config] OPENROUTER_API_KEY loaded: {bool(settings.OPENROUTER_API_KEY)}")
-print(f"[DEBUG] [Config] DEFAULT_LLM_MODEL: {settings.DEFAULT_LLM_MODEL}")
