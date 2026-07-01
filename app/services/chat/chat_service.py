@@ -14,9 +14,11 @@ from uuid import UUID
 from app.models.chat_session import ChatSession, SessionStatus
 from app.models.model import Model
 from app.models.prompt import Prompt
+from app.models.user import User
 from app.models.chat_config import ChatConfig
 from app.services.llm import LLMService
 from app.services.rag import RAGService, create_rag_tools
+from app.services.rag_config_service import ChatConfigService
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -64,6 +66,26 @@ class ChatService:
                 raise ValueError(f"Prompt with ID '{prompt_id}' not found")
             logger.info(f"Using provided prompt: {prompt.name} (ID: {prompt_id})")
 
+        user = None
+        if prompt_general is None or task is None or persona is None or mission_objective is None:
+            user = self.db.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise ValueError(f"User '{user_id}' not found")
+
+        if prompt_general is None:
+            try:
+                prompt_general = ChatConfigService(self.db).get_config().prompt_general
+            except Exception as e:
+                logger.warning(f"Failed to load chat config for prompt_general: {e}")
+
+        if user:
+            if task is None:
+                task = user.task
+            if persona is None:
+                persona = user.persona
+            if mission_objective is None:
+                mission_objective = user.mission_objective
+
         session = ChatSession(
             user_id=user_id,
             model_id=model.id,
@@ -92,6 +114,55 @@ class ChatService:
         logger.info(f"  - mission_objective: {session.mission_objective if session.mission_objective else '(not set)'}")
 
         return session
+
+    def _get_chat_runtime_config(self) -> Dict[str, Any]:
+        """Load chat runtime config with safe fallbacks for latency-sensitive paths."""
+        defaults = {
+            "tool_calling_enabled": True,
+            "tool_calling_max_iterations": 4,
+        }
+        try:
+            config = ChatConfigService(self.db).get_config_dict()
+            return {
+                "tool_calling_enabled": config.get("tool_calling_enabled", True),
+                "tool_calling_max_iterations": max(
+                    1,
+                    min(int(config.get("tool_calling_max_iterations", 4)), 4),
+                ),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load chat runtime config, using defaults: {e}")
+            return defaults
+
+    @staticmethod
+    def _is_small_talk_message(message: str) -> bool:
+        """
+        Skip RAG/tool-calling for trivial conversational turns that do not benefit
+        from retrieval and only add latency.
+        """
+        normalized = " ".join(message.lower().split())
+        trivial_messages = {
+            "hi",
+            "hello",
+            "hey",
+            "halo",
+            "hai",
+            "ok",
+            "oke",
+            "sip",
+            "siap",
+            "thanks",
+            "thank you",
+            "terima kasih",
+            "makasih",
+            "lanjut",
+            "lanjutkan",
+            "ya",
+            "iya",
+            "yes",
+            "no",
+        }
+        return normalized in trivial_messages
 
     def get_session(self, session_id: UUID, user_id: UUID) -> Optional[ChatSession]:
         """Get a chat session by ID."""
@@ -439,8 +510,15 @@ class ChatService:
         })
         logger.debug(f"[REAL_MESSAGES] Added user message (original): {message_content[:50]}...")
 
+        runtime_config = self._get_chat_runtime_config()
+        use_tools = (
+            use_rag
+            and runtime_config["tool_calling_enabled"]
+            and not self._is_small_talk_message(message_content)
+        )
+
         try:
-            if use_rag:
+            if use_tools:
                 # --- RAG Mode: Tool Calling ---
                 # Create RAG tools
                 rag_tools = create_rag_tools(self.db)
@@ -451,7 +529,8 @@ class ChatService:
                 # Use tool calling with RAG
                 async for event in provider.agenerate_stream_with_tools(
                     messages=conversation_context,
-                    tools=rag_tools
+                    tools=rag_tools,
+                    max_iterations=runtime_config["tool_calling_max_iterations"],
                 ):
                     event_type = event.get("type")
                     event_content = event.get("content")
@@ -675,7 +754,7 @@ class ChatService:
 
         # Remove duplicate sources (by document_id and page) and normalize field names
         unique_sources = []
-        if use_rag and sources_list:
+        if use_tools and sources_list:
             seen = set()
             for source in sources_list:
                 # Normalize field names for consistency with frontend
