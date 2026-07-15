@@ -24,6 +24,7 @@ def recover_expired_documents() -> dict[str, int]:
                 UPDATE document
                    SET status = 'CANCELLED',
                        current_stage = NULL,
+                       processing_detail = 'Cancelled after worker lease expired',
                        cancel_requested = false,
                        processing_owner = NULL,
                        lease_expires_at = NULL,
@@ -38,6 +39,10 @@ def recover_expired_documents() -> dict[str, int]:
                 UPDATE document
                    SET status = 'UPLOADED',
                        current_stage = NULL,
+                       progress_percent = 0,
+                       processed_pages = 0,
+                       total_pages = 0,
+                       processing_detail = NULL,
                        processing_owner = NULL,
                        lease_expires_at = NULL,
                        last_heartbeat_at = NULL
@@ -84,6 +89,10 @@ def claim_next_document(worker_id: str, lease_seconds: int) -> str | None:
                 UPDATE document AS d
                    SET status = 'PROCESSING',
                        current_stage = 'queued',
+                       progress_percent = 0,
+                       processed_pages = 0,
+                       total_pages = 0,
+                       processing_detail = 'Waiting for worker',
                        cancel_requested = false,
                        last_error = NULL,
                        processing_owner = :worker_id,
@@ -143,6 +152,7 @@ def cancel_document(document_id: str) -> bool:
                 UPDATE document
                    SET status = 'CANCELLED',
                        current_stage = NULL,
+                       processing_detail = 'Cancelled',
                        cancel_requested = false,
                        processing_owner = NULL,
                        lease_expires_at = NULL,

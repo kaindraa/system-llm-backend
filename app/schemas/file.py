@@ -34,6 +34,10 @@ class FileDetailResponse(BaseModel):
     mime_type: str
     status: DocumentStatus
     current_stage: Optional[str] = Field(None, description="Active ingestion stage (parsing/chunking/embedding/inserting/done)")
+    progress_percent: int = Field(0, ge=0, le=100)
+    processed_pages: int = Field(0, ge=0)
+    total_pages: int = Field(0, ge=0)
+    processing_detail: Optional[str] = None
     last_error: Optional[str] = Field(None, description="Error message of the last failed ingestion attempt")
     retry_count: int = Field(0, description="Number of failed ingestion attempts")
     cancel_requested: bool = Field(False, description="Whether a cancellation has been requested")

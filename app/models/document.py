@@ -41,6 +41,10 @@ class Document(Base):
     status = Column(SQLEnum(DocumentStatus), default=DocumentStatus.UPLOADED, index=True)
     # Processing/ingestion tracking (used by the background ingestion pipeline + dashboard)
     current_stage = Column(String(20))  # one of IngestionStage values; null when not processing
+    progress_percent = Column(Integer, nullable=False, server_default="0", default=0)
+    processed_pages = Column(Integer, nullable=False, server_default="0", default=0)
+    total_pages = Column(Integer, nullable=False, server_default="0", default=0)
+    processing_detail = Column(String(255))
     last_error = Column(Text)  # error message of last failed ingestion attempt
     retry_count = Column(Integer, nullable=False, server_default="0", default=0)
     cancel_requested = Column(Boolean, nullable=False, server_default=sql_text("false"), default=False)

@@ -7,9 +7,7 @@ chunked + embedded `document_chunk` rows for RAG.
 Design (see processing dashboard PRD):
   - Runs as a background task, processing ONE document at a time (serial) to
     keep RAM low on the small Fly machine.
-  - Tracks fine-grained progress via `document.current_stage` (parsing →
-    chunking → embedding → inserting → done) — one small DB write per stage,
-    no per-chunk percentage.
+  - Tracks stage plus bounded progress updates for the processing dashboard.
   - Cooperative cancellation: `document.cancel_requested` is checked between
     stages and between embedding batches.
   - Idempotent: existing chunks for the document are deleted before insert,
@@ -116,14 +114,14 @@ class IngestionService:
             pdf_bytes, original_filename = self._fetch_pdf(document_id)
 
             # 2. Parse (stage=parsing)
-            self._set_stage(document_id, worker_id, IngestionStage.PARSING)
+            self._set_stage(document_id, worker_id, IngestionStage.PARSING, 1, "Opening PDF")
             self._check_cancel(document_id, worker_id)
             pages_text = self._extract_text_from_pdf(document_id, worker_id, pdf_bytes)
             if not pages_text:
                 raise ValueError("No extractable text found in PDF")
 
             # 3. Chunk (stage=chunking)
-            self._set_stage(document_id, worker_id, IngestionStage.CHUNKING)
+            self._set_stage(document_id, worker_id, IngestionStage.CHUNKING, 40, "Preparing text chunks")
             self._check_cancel(document_id, worker_id)
             chunks = self._chunk_text_with_pages(document_id, worker_id, pages_text)
             if not chunks:
@@ -131,11 +129,11 @@ class IngestionService:
             full_text = "\n\n".join(pages_text[p] for p in sorted(pages_text))
 
             # 4. Embed (stage=embedding) — slow, network bound, no DB tx held
-            self._set_stage(document_id, worker_id, IngestionStage.EMBEDDING)
+            self._set_stage(document_id, worker_id, IngestionStage.EMBEDDING, 55, "Creating embeddings")
             embeddings = self._embed_chunks(document_id, worker_id, [c[0] for c in chunks])
 
             # 5. Insert (stage=inserting) — idempotent
-            self._set_stage(document_id, worker_id, IngestionStage.INSERTING)
+            self._set_stage(document_id, worker_id, IngestionStage.INSERTING, 85, "Indexing chunks")
             self._replace_chunks(document_id, worker_id, chunks, embeddings, full_text)
 
             # 6. Finalize
@@ -177,12 +175,24 @@ class IngestionService:
                     raise ValueError(
                         f"PDF has {page_count} pages, exceeds limit of {self.MAX_PDF_PAGES}"
                     )
+                self._set_progress(document_id, worker_id, 2, 0, page_count, f"Extracting page 0/{page_count}")
+                update_every = max(1, page_count // 20)
                 for page_num, page in enumerate(pdf.pages, 1):
                     try:
                         self._check_cancel(document_id, worker_id)
                         extracted = page.extract_text()
                         if extracted:
                             pages_text[page_num] = extracted
+                        if page_num % update_every == 0 or page_num == page_count:
+                            progress = 2 + int((page_num / page_count) * 38)
+                            self._set_progress(
+                                document_id,
+                                worker_id,
+                                progress,
+                                page_num,
+                                page_count,
+                                f"Extracting page {page_num}/{page_count}",
+                            )
                     finally:
                         # pdfplumber caches page layouts, characters, and images.
                         # Releasing each page bounds memory for large PDFs instead
@@ -202,7 +212,10 @@ class IngestionService:
         overlap = self.CHUNK_OVERLAP
         chunks_with_pages: List[Tuple[str, int]] = []
 
-        for page_num in sorted(pages_text.keys()):
+        page_numbers = sorted(pages_text.keys())
+        total_pages = len(page_numbers)
+        update_every = max(1, total_pages // 20)
+        for position, page_num in enumerate(page_numbers, 1):
             self._check_cancel(document_id, worker_id)
             page_content = pages_text[page_num]
             sentences = re.split(r'(?<=[.!?])\s+', page_content)
@@ -226,6 +239,16 @@ class IngestionService:
             if current_chunk:
                 chunk_content = ' '.join(current_chunk)
                 chunks_with_pages.append((chunk_content, page_num))
+            if position % update_every == 0 or position == total_pages:
+                progress = 40 + int((position / total_pages) * 15)
+                self._set_progress(
+                    document_id,
+                    worker_id,
+                    progress,
+                    position,
+                    total_pages,
+                    f"Chunking page {position}/{total_pages}",
+                )
 
         return chunks_with_pages
 
@@ -242,10 +265,18 @@ class IngestionService:
         client = self._get_embeddings_client()
         embeddings: List[List[float]] = []
 
-        for start in range(0, len(texts), self.EMBED_BATCH_SIZE):
+        total_batches = max(1, (len(texts) + self.EMBED_BATCH_SIZE - 1) // self.EMBED_BATCH_SIZE)
+        for batch_index, start in enumerate(range(0, len(texts), self.EMBED_BATCH_SIZE), 1):
             self._check_cancel(document_id, worker_id)
             batch = texts[start:start + self.EMBED_BATCH_SIZE]
             embeddings.extend(self._embed_batch_with_retry(client, batch))
+            progress = 55 + int((batch_index / total_batches) * 30)
+            self._set_progress(
+                document_id,
+                worker_id,
+                progress,
+                detail=f"Embedding batch {batch_index}/{total_batches}",
+            )
 
         return embeddings
 
@@ -293,6 +324,8 @@ class IngestionService:
                 DocumentChunk.document_id == document_id
             ).delete(synchronize_session=False)
 
+            total_chunks = len(chunks)
+            update_every = max(1, total_chunks // 10)
             for idx, ((content, page_number), embedding) in enumerate(zip(chunks, embeddings)):
                 self._check_cancel(document_id, worker_id)
                 db.add(DocumentChunk(
@@ -303,6 +336,14 @@ class IngestionService:
                     embedding=embedding,  # SQLAlchemy/pgvector handles list -> vector
                     chunk_metadata={"page": page_number, "chunk_sequence": idx},
                 ))
+                if (idx + 1) % update_every == 0 or idx + 1 == total_chunks:
+                    progress = 85 + int(((idx + 1) / total_chunks) * 14)
+                    self._set_progress(
+                        document_id,
+                        worker_id,
+                        progress,
+                        detail=f"Indexing chunk {idx + 1}/{total_chunks}",
+                    )
 
             # store raw extracted text on the document (content column)
             db.execute(
@@ -319,14 +360,57 @@ class IngestionService:
     # ------------------------------------------------------------------ #
     # State transitions (short-lived sessions)
     # ------------------------------------------------------------------ #
-    def _set_stage(self, document_id: str, worker_id: str, stage: IngestionStage) -> None:
+    def _set_stage(
+        self,
+        document_id: str,
+        worker_id: str,
+        stage: IngestionStage,
+        progress_percent: int,
+        detail: str,
+    ) -> None:
         self._exec_owned(
             """UPDATE document
-                  SET current_stage = :stage
+                  SET current_stage = :stage,
+                      progress_percent = :progress_percent,
+                      processing_detail = :detail
                 WHERE id = :id
                   AND status = 'PROCESSING'
                   AND processing_owner = :worker_id""",
-            {"stage": stage.value, "id": document_id, "worker_id": worker_id},
+            {
+                "stage": stage.value,
+                "progress_percent": progress_percent,
+                "detail": detail,
+                "id": document_id,
+                "worker_id": worker_id,
+            },
+        )
+
+    def _set_progress(
+        self,
+        document_id: str,
+        worker_id: str,
+        progress_percent: int,
+        processed_pages: int | None = None,
+        total_pages: int | None = None,
+        detail: str | None = None,
+    ) -> None:
+        self._exec_owned(
+            """UPDATE document
+                  SET progress_percent = :progress_percent,
+                      processed_pages = COALESCE(:processed_pages, processed_pages),
+                      total_pages = COALESCE(:total_pages, total_pages),
+                      processing_detail = COALESCE(:detail, processing_detail)
+                WHERE id = :id
+                  AND status = 'PROCESSING'
+                  AND processing_owner = :worker_id""",
+            {
+                "progress_percent": min(99, max(0, progress_percent)),
+                "processed_pages": processed_pages,
+                "total_pages": total_pages,
+                "detail": detail,
+                "id": document_id,
+                "worker_id": worker_id,
+            },
         )
 
     def _finalize(self, document_id: str, worker_id: str) -> None:
@@ -334,6 +418,8 @@ class IngestionService:
             """UPDATE document
                   SET status = 'PROCESSED',
                       current_stage = :stage,
+                      progress_percent = 100,
+                      processing_detail = 'Ready',
                       processed_at = now(),
                       last_error = NULL,
                       processing_owner = NULL,

@@ -579,6 +579,10 @@ async def ingest_file(
         document.cancel_requested = False
         document.status = DocumentStatus.UPLOADED
         document.current_stage = None
+        document.progress_percent = 0
+        document.processed_pages = 0
+        document.total_pages = 0
+        document.processing_detail = None
         document.processing_owner = None
         document.lease_expires_at = None
         document.last_heartbeat_at = None
