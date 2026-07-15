@@ -14,6 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Stop worker before migration
+        run: flyctl scale count worker=0 -a system-llm-backend --yes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Restore worker after deployment
+        if: ${{ always() }}
+        run: flyctl scale count worker=1 -a system-llm-backend --yes
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

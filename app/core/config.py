@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "system_llm"
+    # Supabase Session Pooler on the current tier allows 15 client sessions.
+    # Keep two Fly processes below that limit, with space for migrations.
+    DATABASE_POOL_SIZE: int = 4
+    DATABASE_MAX_OVERFLOW: int = 1
+    DATABASE_POOL_TIMEOUT_SECONDS: int = 30
 
     # Security
     SECRET_KEY: str

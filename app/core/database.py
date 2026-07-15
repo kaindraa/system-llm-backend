@@ -7,10 +7,13 @@ from app.core.config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,      # Verify connections before using
-    pool_size=20,            # Connection pool size (increased from 5)
-    max_overflow=40,         # Max overflow connections (increased from 10)
+    # Two Fly processes share a Supabase Session Pooler limited to 15 client
+    # sessions. Each process may use at most five, leaving capacity for a
+    # release migration and Supabase-managed clients.
+    pool_size=settings.DATABASE_POOL_SIZE,
+    max_overflow=settings.DATABASE_MAX_OVERFLOW,
     pool_recycle=3600,       # Recycle connections every hour
-    pool_timeout=60,         # Timeout 60 seconds (increased from 30)
+    pool_timeout=settings.DATABASE_POOL_TIMEOUT_SECONDS,
     connect_args={
         "connect_timeout": 10,
     },
