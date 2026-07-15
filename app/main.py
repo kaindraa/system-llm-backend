@@ -18,7 +18,6 @@ from app.admin import (
     ChatConfigAdmin,
 )
 from app.services.file_service import initialize_storage_provider
-from app.services.llm import LLMService
 
 # Setup logging first
 setup_logging()
@@ -175,15 +174,10 @@ async def startup_event():
         logger.error(f"❌ Failed to initialize storage provider: {str(e)}")
         raise
 
-    # Initialize LLM service singleton (reuse providers across requests)
-    try:
-        from app.core.database import SessionLocal
-        db = SessionLocal()
-        app.state.llm_service = LLMService(db=db)
-        logger.info(f"✅ LLM service singleton initialized (provider cache enabled)")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize LLM service: {str(e)}")
-        raise
+    # Providers are expensive to initialize, so share only their cache. Database
+    # sessions must remain request-scoped and are created by get_llm_service.
+    app.state.llm_provider_cache = {}
+    logger.info("✅ LLM provider cache initialized")
 
     logger.info("✅ Web process ready (document ingestion is handled by worker process group)")
 

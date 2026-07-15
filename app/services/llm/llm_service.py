@@ -30,15 +30,21 @@ class LLMService:
         # "huggingface": HuggingFaceProvider,
     }
 
-    def __init__(self, db: Optional[Session] = None):
+    def __init__(
+        self,
+        db: Optional[Session] = None,
+        provider_cache: Optional[Dict[str, BaseLLMProvider]] = None,
+    ):
         """
         Initialize LLM service.
 
         Args:
-            db: Database session for fetching model configurations
+            db: Request-scoped database session for fetching model configurations.
+            provider_cache: Optional process-wide cache. This shares provider
+                clients without retaining a database session between requests.
         """
         self.db = db
-        self._providers: Dict[str, BaseLLMProvider] = {}
+        self._providers = provider_cache if provider_cache is not None else {}
 
     def get_provider(
         self,

@@ -257,6 +257,11 @@ class ChatService:
         if session.status != SessionStatus.ACTIVE.value:
             raise ValueError(f"Session {session_id} is not active")
 
+        # Keep scalar values needed during generation before the session is
+        # rolled back below. Accessing an expired ORM object would reacquire a
+        # pool connection for the whole remote LLM wait.
+        model_id = str(session.model_id)
+
         # Build conversation context to get system prompt
         conversation_context = self._build_conversation_context(session)
 
@@ -517,15 +522,22 @@ class ChatService:
             and not self._is_small_talk_message(message_content)
         )
 
+        # Tool construction reads the configured refinement prompt. Do it
+        # before releasing the connection, not while the model is streaming.
+        rag_tools = create_rag_tools(self.db) if use_tools else []
+
+        # Resolve the model while this request owns its DB session. The provider
+        # itself is cacheable and does not need the session while streaming.
+        provider = self.llm_service.get_provider(model_id, api_key=api_key)
+
+        # All data required to start generation has been loaded. Return the
+        # request connection to Supabase before waiting on a remote LLM. RAG
+        # tool calls can transparently acquire it again only when needed.
+        self.db.rollback()
+
         try:
             if use_tools:
                 # --- RAG Mode: Tool Calling ---
-                # Create RAG tools
-                rag_tools = create_rag_tools(self.db)
-
-                # Get LLM provider for tool calling
-                provider = self.llm_service.get_provider(str(session.model_id), api_key=api_key)
-
                 # Use tool calling with RAG
                 async for event in provider.agenerate_stream_with_tools(
                     messages=conversation_context,
@@ -740,11 +752,7 @@ class ChatService:
 
             else:
                 # --- Regular Mode: No RAG ---
-                async for chunk in self.llm_service.generate_stream(
-                    model_id=str(session.model_id),
-                    messages=conversation_context,
-                    api_key=api_key
-                ):
+                async for chunk in provider.agenerate_stream(messages=conversation_context):
                     full_content += chunk
                     yield {"type": "chunk", "content": chunk}
 

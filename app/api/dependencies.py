@@ -13,9 +13,15 @@ security = HTTPBearer()
 logger = get_logger(__name__)
 
 
-def get_llm_service(request: Request) -> LLMService:
-    """Get singleton LLM service from app state."""
-    return request.app.state.llm_service
+def get_llm_service(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> LLMService:
+    """Create a request-scoped LLM service backed by the shared provider cache."""
+    return LLMService(
+        db=db,
+        provider_cache=request.app.state.llm_provider_cache,
+    )
 
 
 async def get_current_user(

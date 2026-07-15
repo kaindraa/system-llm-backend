@@ -132,6 +132,10 @@ class RAGToolFactory:
                     "count": 0,
                     "error": str(e)
                 }
+            finally:
+                # Tool queries are read-only. Do not keep a Supabase session
+                # checked out while the model continues its streamed response.
+                self.db.rollback()
 
         # Create wrapper to properly handle argument extraction from OpenAI tool calls
         def tool_wrapper(**kwargs) -> Dict[str, Any]:
@@ -332,6 +336,10 @@ class RAGToolFactory:
                     "success": False,
                     "error": str(e)
                 }
+            finally:
+                # The refinement tool only performs reads before its LLM call.
+                # Release its session before control returns to the outer stream.
+                self.db.rollback()
 
         # Create wrapper to handle tool call format
         def tool_wrapper(**kwargs) -> Dict[str, Any]:
