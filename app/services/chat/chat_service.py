@@ -464,6 +464,10 @@ class ChatService:
         if session.status != SessionStatus.ACTIVE.value:
             raise ValueError(f"Session {session_id} is not active")
 
+        # Preserve the scalar before releasing the request transaction below.
+        # The provider factory accepts either the UUID or model name.
+        model_id = str(session.model_id)
+
         # Build conversation context to get system prompt
         conversation_context = self._build_conversation_context(session)
 

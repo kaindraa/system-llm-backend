@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-4-mini"
+    # Bound remote model calls so a provider/network incident cannot leave an
+    # SSE chat request open forever. The stream timeout applies per upstream
+    # OpenRouter request; the endpoint timeout covers the entire tool loop.
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 45
+    CHAT_GENERATION_TIMEOUT_SECONDS: int = 120
 
     # Cloud Storage Configuration
     STORAGE_TYPE: str = "local"  # Options: "local", "gcs", "supabase"

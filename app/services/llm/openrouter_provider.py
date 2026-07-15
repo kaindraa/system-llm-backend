@@ -1,9 +1,11 @@
+import asyncio
 from typing import Dict, Any, List, Optional
 import json
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import Tool
 from app.services.llm.base import BaseLLMProvider
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -56,7 +58,11 @@ class OpenRouterProvider(BaseLLMProvider):
             "base_url": self.base_url,
             "default_headers": default_headers,
             "model_kwargs": {},
-            "temperature": 1
+            "temperature": 1,
+            # Do not let an upstream OpenRouter connection hold an SSE request
+            # forever. A failed request is surfaced to the client instead.
+            "timeout": settings.LLM_REQUEST_TIMEOUT_SECONDS,
+            "max_retries": 0,
         }
 
         # Add API key - REQUIRED for OpenRouter authentication
@@ -275,6 +281,15 @@ class OpenRouterProvider(BaseLLMProvider):
                         full_response = full_response + chunk
                     if chunk.content:
                         yield {"type": "chunk", "content": chunk.content}
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.error(
+                    "[OPENROUTER] Tool stream timed out after %ss for %s",
+                    settings.LLM_REQUEST_TIMEOUT_SECONDS,
+                    self.model_name,
+                )
+                raise
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 logger.error(f"[OPENROUTER] Streaming failed: {e}. Falling back to non-tool mode.", exc_info=True)
                 async for chunk in self.agenerate_stream(messages):

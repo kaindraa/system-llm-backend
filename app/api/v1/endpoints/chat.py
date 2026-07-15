@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from uuid import UUID
+import asyncio
 import json
 
 from app.api.dependencies import get_db, get_current_user, get_current_admin, get_current_student, get_llm_service
@@ -339,44 +340,56 @@ async def send_message(
                 }
                 api_key = api_key_mapping.get(provider_name)
 
-            async for event in chat_service.send_message_stream(
-                session_id=session_id,
-                user_id=current_user.id,
-                message_content=request.message,
-                api_key=api_key,
-                use_rag=True  # Enable RAG by default - LLM decides if it needs to search
-            ):
-                event_type = event.get("type", "UNKNOWN")
-                # Normalize event_type: strip whitespace and convert to lowercase for comparison
-                event_type_normalized = event_type.strip().lower() if isinstance(event_type, str) else str(event_type).strip().lower()
-                content = event.get("content", {})
+            try:
+                async with asyncio.timeout(settings.CHAT_GENERATION_TIMEOUT_SECONDS):
+                    async for event in chat_service.send_message_stream(
+                        session_id=session_id,
+                        user_id=current_user.id,
+                        message_content=request.message,
+                        api_key=api_key,
+                        use_rag=True  # Enable RAG by default - LLM decides if it needs to search
+                    ):
+                        event_type = event.get("type", "UNKNOWN")
+                        # Normalize event_type: strip whitespace and convert to lowercase for comparison
+                        event_type_normalized = event_type.strip().lower() if isinstance(event_type, str) else str(event_type).strip().lower()
+                        content = event.get("content", {})
 
-                if event_type_normalized == "user_message":
-                    yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
-                elif event_type_normalized == "refine_prompt":
-                    # Refine prompt tool is being called (TAHAP 1 - LLM decide)
-                    yield f"event: refine_prompt\ndata: {json.dumps(content)}\n\n"
-                elif event_type_normalized == "refine_prompt_result":
-                    # Refine prompt tool result (TAHAP 2 - tool executed)
-                    yield f"event: refine_prompt_result\ndata: {json.dumps(content)}\n\n"
-                elif event_type_normalized == "rag_search":
-                    # RAG tool call event
-                    yield f"event: rag_search\ndata: {json.dumps(content)}\n\n"
-                elif event_type_normalized == "rag_search_result":
-                    # RAG tool result event
-                    yield f"event: rag_search_result\ndata: {json.dumps(content)}\n\n"
-                elif event_type_normalized == "chunk":
-                    # Text chunk from LLM response
-                    yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"
-                elif event_type_normalized == "done":
-                    # Final response with sources and tool_calls
-                    done_response = {
-                        "type": "done",
-                        "content": content,  # assistant_message
-                        "sources": event.get("sources", []),  # ← Include sources!
-                        "tool_calls": event.get("tool_calls", [])  # ← Include tool_calls!
-                    }
-                    yield f"event: done\ndata: {json.dumps(done_response)}\n\n"
+                        if event_type_normalized == "user_message":
+                            yield f"event: user_message\ndata: {json.dumps(content)}\n\n"
+                        elif event_type_normalized == "refine_prompt":
+                            # Refine prompt tool is being called (TAHAP 1 - LLM decide)
+                            yield f"event: refine_prompt\ndata: {json.dumps(content)}\n\n"
+                        elif event_type_normalized == "refine_prompt_result":
+                            # Refine prompt tool result (TAHAP 2 - tool executed)
+                            yield f"event: refine_prompt_result\ndata: {json.dumps(content)}\n\n"
+                        elif event_type_normalized == "rag_search":
+                            # RAG tool call event
+                            yield f"event: rag_search\ndata: {json.dumps(content)}\n\n"
+                        elif event_type_normalized == "rag_search_result":
+                            # RAG tool result event
+                            yield f"event: rag_search_result\ndata: {json.dumps(content)}\n\n"
+                        elif event_type_normalized == "chunk":
+                            # Text chunk from LLM response
+                            yield f"event: chunk\ndata: {json.dumps({'content': content})}\n\n"
+                        elif event_type_normalized == "done":
+                            # Final response with sources and tool_calls
+                            done_response = {
+                                "type": "done",
+                                "content": content,  # assistant_message
+                                "sources": event.get("sources", []),  # ← Include sources!
+                                "tool_calls": event.get("tool_calls", [])  # ← Include tool_calls!
+                            }
+                            yield f"event: done\ndata: {json.dumps(done_response)}\n\n"
+            except TimeoutError:
+                logger.error(
+                    "Chat generation timed out after %ss for session %s",
+                    settings.CHAT_GENERATION_TIMEOUT_SECONDS,
+                    session_id,
+                )
+                yield (
+                    "event: error\ndata: "
+                    f"{json.dumps({'error': 'Model response timed out. Please try again.'})}\n\n"
+                )
 
         except ValueError as e:
             logger.error(f"Invalid request: {str(e)}")
