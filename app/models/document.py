@@ -44,6 +44,13 @@ class Document(Base):
     last_error = Column(Text)  # error message of last failed ingestion attempt
     retry_count = Column(Integer, nullable=False, server_default="0", default=0)
     cancel_requested = Column(Boolean, nullable=False, server_default=sql_text("false"), default=False)
+    # Lease metadata makes the database queue safe across worker restarts and
+    # allows a genuinely abandoned job to be reclaimed without touching jobs
+    # owned by a still-running worker.
+    processing_owner = Column(String(128), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    attempt_count = Column(Integer, nullable=False, server_default="0", default=0)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True))
 
