@@ -23,6 +23,7 @@ from app.schemas.file import (
     FileMetadataResponse,
 )
 from app.services.file_service import FileService, storage_provider
+from app.services.rag.ingestion_runner import cancel_document
 from app.core.logging import get_logger
 from pydantic import BaseModel
 
@@ -613,8 +614,8 @@ async def cancel_ingestion(
     current_admin: User = Depends(get_current_admin),
 ):
     """
-    Request cooperative cancellation of a running ingestion. The worker checks
-    the flag between stages and stops at the next boundary (not instant).
+    Cancel an active ingestion immediately. The worker loses its DB lease, so
+    a slow parser cannot later write chunks after the document is cancelled.
 
     **Requires ADMIN role only.**
     """
@@ -628,11 +629,16 @@ async def cancel_ingestion(
                 detail="Only a document that is currently processing can be cancelled",
             )
 
-        document.cancel_requested = True
-        db.commit()
+        if not cancel_document(str(file_id)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is no longer being processed",
+            )
+
+        db.expire(document)
         db.refresh(document)
 
-        logger.info(f"Cancellation requested by admin {current_admin.id}: {file_id}")
+        logger.info(f"Ingestion cancelled by admin {current_admin.id}: {file_id}")
         return FileDetailResponse.model_validate(document)
 
     except FileNotFoundError:

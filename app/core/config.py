@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     INGESTION_POLL_INTERVAL_SECONDS: float = 2.0
     INGESTION_LEASE_SECONDS: int = 300
     INGESTION_HEARTBEAT_INTERVAL_SECONDS: int = 30
+    INGESTION_MAX_PDF_PAGES: int = 500
+    INGESTION_PDF_PARSE_TIMEOUT_SECONDS: int = 600
 
     @property
     def cors_origins(self) -> List[str]:

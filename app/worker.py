@@ -85,7 +85,10 @@ def main() -> int:
     )
 
     idle_sleep = max(0.5, settings.INGESTION_POLL_INTERVAL_SECONDS)
-    recovery_interval = max(30.0, min(float(settings.INGESTION_LEASE_SECONDS), 300.0))
+    # Check abandoned leases frequently. A machine killed by an oversized PDF
+    # should be recoverable soon after its lease expires, not five minutes
+    # later just because the replacement worker started a new loop.
+    recovery_interval = 30.0
     next_recovery_at = time.monotonic() + recovery_interval
 
     while _running:

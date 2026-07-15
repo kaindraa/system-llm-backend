@@ -16,6 +16,7 @@ from app.core.database import SessionLocal
 from app.models.document import Document, DocumentStatus
 from app.models.user import User, UserRole
 from app.services.rag.ingestion_runner import (
+    cancel_document,
     claim_next_document,
     recover_expired_documents,
     renew_document_lease,
@@ -80,6 +81,10 @@ def main() -> None:
         ), "current owner should renew its own lease"
         assert not renew_document_lease(claimed[0], "wrong-worker", 60), "wrong owner renewed a lease"
 
+        # A cancel request must release its lease immediately, even before a
+        # slow PDF parser reaches its next cooperative checkpoint.
+        assert cancel_document(claims["queue-test-worker-b"]), "active job should cancel immediately"
+
         db = SessionLocal()
         try:
             # Simulate a hard crash: lease expires and the job is requeued.
@@ -91,22 +96,12 @@ def main() -> None:
                 """),
                 {"id": claimed[0]},
             )
-            # Simulate a cancel request that outlives a crashed worker.
-            db.execute(
-                sql_text("""
-                    UPDATE document
-                       SET lease_expires_at = now() - interval '1 second',
-                           cancel_requested = true
-                     WHERE id = :id
-                """),
-                {"id": claimed[1]},
-            )
             db.commit()
         finally:
             db.close()
 
         recovered = recover_expired_documents()
-        assert recovered == {"reset": 1, "cancelled": 1}, recovered
+        assert recovered == {"reset": 1, "cancelled": 0}, recovered
 
         db = SessionLocal()
         try:

@@ -24,7 +24,10 @@ and the slow embedding step holds no DB transaction.
 
 import io
 import re
+import signal
+import threading
 import time
+from contextlib import contextmanager
 from typing import List, Dict, Tuple
 
 from sqlalchemy import text as sql_text
@@ -49,6 +52,39 @@ class IngestionLeaseLost(Exception):
     pass
 
 
+class PDFParseTimeout(Exception):
+    """Raised when PDF extraction exceeds the configured safety deadline."""
+    pass
+
+
+@contextmanager
+def _pdf_parse_deadline(seconds: int):
+    """Interrupt a hung parser on Unix worker processes.
+
+    The dedicated worker executes this on its main thread. Other environments
+    without SIGALRM simply retain the page and memory limits.
+    """
+    if (
+        seconds <= 0
+        or not hasattr(signal, "SIGALRM")
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        yield
+        return
+
+    def _timeout(_signum, _frame):
+        raise PDFParseTimeout(f"PDF parsing exceeded {seconds} seconds")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _timeout)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 class IngestionService:
     """Processes a single uploaded PDF document into RAG chunks."""
 
@@ -57,7 +93,7 @@ class IngestionService:
     EMBED_MAX_RETRIES = 3          # Level A: transient error retries
     CHUNK_SIZE = 500               # words per chunk (matches notebook)
     CHUNK_OVERLAP = 50             # word overlap (matches notebook)
-    MAX_PDF_PAGES = 1000           # guard against runaway RAM on the 1GB machine
+    MAX_PDF_PAGES = settings.INGESTION_MAX_PDF_PAGES
 
     def __init__(self):
         self._embeddings_client = None
@@ -134,16 +170,25 @@ class IngestionService:
         import pdfplumber
 
         pages_text: Dict[int, str] = {}
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            if len(pdf.pages) > self.MAX_PDF_PAGES:
-                raise ValueError(
-                    f"PDF has {len(pdf.pages)} pages, exceeds limit of {self.MAX_PDF_PAGES}"
-                )
-            for page_num, page in enumerate(pdf.pages, 1):
-                self._check_cancel(document_id, worker_id)
-                extracted = page.extract_text()
-                if extracted:
-                    pages_text[page_num] = extracted
+        with _pdf_parse_deadline(settings.INGESTION_PDF_PARSE_TIMEOUT_SECONDS):
+            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                page_count = len(pdf.pages)
+                if page_count > self.MAX_PDF_PAGES:
+                    raise ValueError(
+                        f"PDF has {page_count} pages, exceeds limit of {self.MAX_PDF_PAGES}"
+                    )
+                for page_num, page in enumerate(pdf.pages, 1):
+                    try:
+                        self._check_cancel(document_id, worker_id)
+                        extracted = page.extract_text()
+                        if extracted:
+                            pages_text[page_num] = extracted
+                    finally:
+                        # pdfplumber caches page layouts, characters, and images.
+                        # Releasing each page bounds memory for large PDFs instead
+                        # of accumulating hundreds of page object graphs.
+                        page.close()
+                pdf.flush_cache()
         return pages_text
 
     def _chunk_text_with_pages(

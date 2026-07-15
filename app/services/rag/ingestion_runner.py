@@ -127,3 +127,41 @@ def renew_document_lease(document_id: str, worker_id: str, lease_seconds: int) -
         return result.rowcount == 1
     finally:
         db.close()
+
+
+def cancel_document(document_id: str) -> bool:
+    """Atomically cancel an owned job without waiting for a parser checkpoint.
+
+    A worker may be inside a slow native PDF extraction call. Clearing its
+    ownership makes every later checkpoint fail closed with IngestionLeaseLost,
+    so it cannot write chunks or overwrite this final cancellation state.
+    """
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            sql_text("""
+                UPDATE document
+                   SET status = 'CANCELLED',
+                       current_stage = NULL,
+                       cancel_requested = false,
+                       processing_owner = NULL,
+                       lease_expires_at = NULL,
+                       last_heartbeat_at = NULL
+                 WHERE id = :document_id
+                   AND status = 'PROCESSING'
+            """),
+            {"document_id": document_id},
+        )
+        if result.rowcount != 1:
+            db.rollback()
+            return False
+
+        # A cancelled re-ingest must never leave stale partial chunks behind.
+        db.execute(
+            sql_text("DELETE FROM document_chunk WHERE document_id = :document_id"),
+            {"document_id": document_id},
+        )
+        db.commit()
+        return True
+    finally:
+        db.close()
