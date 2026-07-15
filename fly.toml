@@ -6,10 +6,10 @@ primary_region = 'sin'
 
 [build]
 
-# NOTE: no [deploy] release_command — the image ENTRYPOINT (entrypoint.sh)
-# always exec's uvicorn and ignores the release command, so a release machine
-# never exits and the deploy times out. Run DB migrations manually instead:
-#   fly console -a system-llm-backend -C "alembic upgrade head"
+[deploy]
+# entrypoint.sh now executes Fly's supplied process command, so migrations run
+# once before the new web and worker machines are started.
+release_command = "alembic upgrade head"
 
 [env]
   PORT = "8000"

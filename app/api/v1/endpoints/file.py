@@ -578,6 +578,9 @@ async def ingest_file(
         document.cancel_requested = False
         document.status = DocumentStatus.UPLOADED
         document.current_stage = None
+        document.processing_owner = None
+        document.lease_expires_at = None
+        document.last_heartbeat_at = None
         db.commit()
         db.refresh(document)
 

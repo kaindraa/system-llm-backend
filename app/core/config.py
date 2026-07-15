@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     INGESTION_REQUEUE_ORPHANS_ON_STARTUP: bool = False
     INGESTION_HEARTBEAT_ENABLED: bool = False
     INGESTION_POLL_INTERVAL_SECONDS: float = 2.0
+    INGESTION_LEASE_SECONDS: int = 300
+    INGESTION_HEARTBEAT_INTERVAL_SECONDS: int = 30
 
     @property
     def cors_origins(self) -> List[str]:

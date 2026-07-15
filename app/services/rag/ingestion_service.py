@@ -32,7 +32,7 @@ from sqlalchemy import text as sql_text
 from app.core.database import SessionLocal
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.document import DocumentStatus, IngestionStage
+from app.models.document import IngestionStage
 from app.models.document_chunk import DocumentChunk
 from app.services.file_service import FileService
 
@@ -41,6 +41,11 @@ logger = get_logger(__name__)
 
 class IngestionCancelled(Exception):
     """Raised internally when cancel_requested is observed mid-pipeline."""
+    pass
+
+
+class IngestionLeaseLost(Exception):
+    """Raised when a replacement worker has taken ownership of a document."""
     pass
 
 
@@ -60,7 +65,7 @@ class IngestionService:
     # ------------------------------------------------------------------ #
     # Public entrypoint
     # ------------------------------------------------------------------ #
-    def ingest_document(self, document_id: str) -> None:
+    def ingest_document(self, document_id: str, worker_id: str) -> None:
         """
         Run the full ingestion pipeline for one document.
 
@@ -68,55 +73,63 @@ class IngestionService:
         outcomes are recorded on the document row (PROCESSED / FAILED /
         CANCELLED).
         """
-        # Atomic claim: only proceed if not already being processed.
-        if not self._claim(document_id):
-            logger.info(f"[ingest] {document_id} already processing or missing — skip")
-            return
-
         logger.info(f"[ingest] start document={document_id}")
         try:
             # 1. Fetch PDF bytes
-            self._check_cancel(document_id)
+            self._check_cancel(document_id, worker_id)
             pdf_bytes, original_filename = self._fetch_pdf(document_id)
 
             # 2. Parse (stage=parsing)
-            self._set_stage(document_id, IngestionStage.PARSING)
-            self._check_cancel(document_id)
-            pages_text = self._extract_text_from_pdf(document_id, pdf_bytes)
+            self._set_stage(document_id, worker_id, IngestionStage.PARSING)
+            self._check_cancel(document_id, worker_id)
+            pages_text = self._extract_text_from_pdf(document_id, worker_id, pdf_bytes)
             if not pages_text:
                 raise ValueError("No extractable text found in PDF")
 
             # 3. Chunk (stage=chunking)
-            self._set_stage(document_id, IngestionStage.CHUNKING)
-            self._check_cancel(document_id)
-            chunks = self._chunk_text_with_pages(document_id, pages_text)
+            self._set_stage(document_id, worker_id, IngestionStage.CHUNKING)
+            self._check_cancel(document_id, worker_id)
+            chunks = self._chunk_text_with_pages(document_id, worker_id, pages_text)
             if not chunks:
                 raise ValueError("PDF produced zero chunks")
             full_text = "\n\n".join(pages_text[p] for p in sorted(pages_text))
 
             # 4. Embed (stage=embedding) — slow, network bound, no DB tx held
-            self._set_stage(document_id, IngestionStage.EMBEDDING)
-            embeddings = self._embed_chunks(document_id, [c[0] for c in chunks])
+            self._set_stage(document_id, worker_id, IngestionStage.EMBEDDING)
+            embeddings = self._embed_chunks(document_id, worker_id, [c[0] for c in chunks])
 
             # 5. Insert (stage=inserting) — idempotent
-            self._set_stage(document_id, IngestionStage.INSERTING)
-            self._replace_chunks(document_id, chunks, embeddings, full_text)
+            self._set_stage(document_id, worker_id, IngestionStage.INSERTING)
+            self._replace_chunks(document_id, worker_id, chunks, embeddings, full_text)
 
             # 6. Finalize
-            self._finalize(document_id)
+            self._finalize(document_id, worker_id)
             logger.info(f"[ingest] done document={document_id} chunks={len(chunks)}")
 
         except IngestionCancelled:
             logger.info(f"[ingest] cancelled document={document_id}")
-            self._mark_cancelled(document_id)
+            try:
+                self._mark_cancelled(document_id, worker_id)
+            except IngestionLeaseLost:
+                logger.warning(f"[ingest] lease lost while cancelling document={document_id}")
+        except IngestionLeaseLost:
+            logger.warning(f"[ingest] lease lost document={document_id}; replacement worker owns it")
         except Exception as e:
             logger.error(f"[ingest] failed document={document_id}: {e}", exc_info=True)
-            self._mark_failed(document_id, str(e))
+            try:
+                self._mark_failed(document_id, worker_id, str(e))
+            except IngestionLeaseLost:
+                logger.warning(f"[ingest] lease lost while failing document={document_id}")
 
     # ------------------------------------------------------------------ #
     # Pipeline stages (ported from the notebook)
     # ------------------------------------------------------------------ #
-    def _extract_text_from_pdf(self, document_id: str, pdf_bytes: bytes) -> Dict[int, str]:
+    def _extract_text_from_pdf(
+        self,
+        document_id: str,
+        worker_id: str,
+        pdf_bytes: bytes,
+    ) -> Dict[int, str]:
         """Extract text per page: {page_number: text}. (notebook cell 8)"""
         import pdfplumber
 
@@ -127,7 +140,7 @@ class IngestionService:
                     f"PDF has {len(pdf.pages)} pages, exceeds limit of {self.MAX_PDF_PAGES}"
                 )
             for page_num, page in enumerate(pdf.pages, 1):
-                self._check_cancel(document_id)
+                self._check_cancel(document_id, worker_id)
                 extracted = page.extract_text()
                 if extracted:
                     pages_text[page_num] = extracted
@@ -136,6 +149,7 @@ class IngestionService:
     def _chunk_text_with_pages(
         self,
         document_id: str,
+        worker_id: str,
         pages_text: Dict[int, str]
     ) -> List[Tuple[str, int]]:
         """Sentence-aware, word-counted chunking with page tracking. (notebook cell 10)"""
@@ -144,7 +158,7 @@ class IngestionService:
         chunks_with_pages: List[Tuple[str, int]] = []
 
         for page_num in sorted(pages_text.keys()):
-            self._check_cancel(document_id)
+            self._check_cancel(document_id, worker_id)
             page_content = pages_text[page_num]
             sentences = re.split(r'(?<=[.!?])\s+', page_content)
 
@@ -170,7 +184,12 @@ class IngestionService:
 
         return chunks_with_pages
 
-    def _embed_chunks(self, document_id: str, texts: List[str]) -> List[List[float]]:
+    def _embed_chunks(
+        self,
+        document_id: str,
+        worker_id: str,
+        texts: List[str],
+    ) -> List[List[float]]:
         """
         Generate embeddings in batches with retry/backoff.
         Checks cancellation between batches.
@@ -179,7 +198,7 @@ class IngestionService:
         embeddings: List[List[float]] = []
 
         for start in range(0, len(texts), self.EMBED_BATCH_SIZE):
-            self._check_cancel(document_id)
+            self._check_cancel(document_id, worker_id)
             batch = texts[start:start + self.EMBED_BATCH_SIZE]
             embeddings.extend(self._embed_batch_with_retry(client, batch))
 
@@ -202,6 +221,7 @@ class IngestionService:
     def _replace_chunks(
         self,
         document_id: str,
+        worker_id: str,
         chunks: List[Tuple[str, int]],
         embeddings: List[List[float]],
         full_text: str,
@@ -209,13 +229,27 @@ class IngestionService:
         """Delete existing chunks then insert new ones (idempotent). Single transaction."""
         db = SessionLocal()
         try:
+            owned = db.execute(
+                sql_text("""
+                    SELECT 1
+                      FROM document
+                     WHERE id = :id
+                       AND status = 'PROCESSING'
+                       AND processing_owner = :worker_id
+                       AND lease_expires_at >= now()
+                """),
+                {"id": document_id, "worker_id": worker_id},
+            ).scalar()
+            if not owned:
+                raise IngestionLeaseLost()
+
             # idempotency: clear previous chunks for this document
             db.query(DocumentChunk).filter(
                 DocumentChunk.document_id == document_id
             ).delete(synchronize_session=False)
 
             for idx, ((content, page_number), embedding) in enumerate(zip(chunks, embeddings)):
-                self._check_cancel(document_id)
+                self._check_cancel(document_id, worker_id)
                 db.add(DocumentChunk(
                     document_id=document_id,
                     chunk_index=idx,
@@ -240,61 +274,68 @@ class IngestionService:
     # ------------------------------------------------------------------ #
     # State transitions (short-lived sessions)
     # ------------------------------------------------------------------ #
-    def _claim(self, document_id: str) -> bool:
-        """
-        Atomically mark the document PROCESSING. Returns False if it does not
-        exist or is already being processed (prevents double ingestion).
-        """
-        db = SessionLocal()
-        try:
-            result = db.execute(
-                sql_text("""
-                    UPDATE document
-                       SET status = 'PROCESSING',
-                           current_stage = :stage,
-                           cancel_requested = false,
-                           last_error = NULL
-                     WHERE id = :id
-                       AND status != 'PROCESSING'
-                """),
-                {"stage": IngestionStage.QUEUED.value, "id": document_id},
-            )
-            db.commit()
-            return result.rowcount > 0
-        finally:
-            db.close()
-
-    def _set_stage(self, document_id: str, stage: IngestionStage) -> None:
-        self._exec(
-            "UPDATE document SET current_stage = :stage WHERE id = :id",
-            {"stage": stage.value, "id": document_id},
+    def _set_stage(self, document_id: str, worker_id: str, stage: IngestionStage) -> None:
+        self._exec_owned(
+            """UPDATE document
+                  SET current_stage = :stage
+                WHERE id = :id
+                  AND status = 'PROCESSING'
+                  AND processing_owner = :worker_id""",
+            {"stage": stage.value, "id": document_id, "worker_id": worker_id},
         )
 
-    def _finalize(self, document_id: str) -> None:
-        self._exec(
+    def _finalize(self, document_id: str, worker_id: str) -> None:
+        self._exec_owned(
             """UPDATE document
                   SET status = 'PROCESSED',
                       current_stage = :stage,
                       processed_at = now(),
-                      last_error = NULL
-                WHERE id = :id""",
-            {"stage": IngestionStage.DONE.value, "id": document_id},
+                      last_error = NULL,
+                      processing_owner = NULL,
+                      lease_expires_at = NULL,
+                      last_heartbeat_at = NULL
+                WHERE id = :id
+                  AND status = 'PROCESSING'
+                  AND processing_owner = :worker_id""",
+            {
+                "stage": IngestionStage.DONE.value,
+                "id": document_id,
+                "worker_id": worker_id,
+            },
         )
 
-    def _mark_failed(self, document_id: str, error: str) -> None:
-        self._exec(
+    def _mark_failed(self, document_id: str, worker_id: str, error: str) -> None:
+        self._exec_owned(
             """UPDATE document
                   SET status = 'FAILED',
+                      current_stage = NULL,
                       last_error = :err,
-                      retry_count = retry_count + 1
-                WHERE id = :id""",
-            {"err": error[:2000], "id": document_id},
+                      retry_count = retry_count + 1,
+                      processing_owner = NULL,
+                      lease_expires_at = NULL,
+                      last_heartbeat_at = NULL
+                WHERE id = :id
+                  AND status = 'PROCESSING'
+                  AND processing_owner = :worker_id""",
+            {"err": error[:2000], "id": document_id, "worker_id": worker_id},
         )
 
-    def _mark_cancelled(self, document_id: str) -> None:
+    def _mark_cancelled(self, document_id: str, worker_id: str) -> None:
         # remove any partial chunks written before cancellation
         db = SessionLocal()
         try:
+            owned = db.execute(
+                sql_text("""
+                    SELECT 1
+                      FROM document
+                     WHERE id = :id
+                       AND status = 'PROCESSING'
+                       AND processing_owner = :worker_id
+                """),
+                {"id": document_id, "worker_id": worker_id},
+            ).scalar()
+            if not owned:
+                raise IngestionLeaseLost()
             db.query(DocumentChunk).filter(
                 DocumentChunk.document_id == document_id
             ).delete(synchronize_session=False)
@@ -302,27 +343,44 @@ class IngestionService:
                 sql_text("""UPDATE document
                                SET status = 'CANCELLED',
                                    current_stage = NULL,
-                                   cancel_requested = false
-                             WHERE id = :id"""),
-                {"id": document_id},
+                                   cancel_requested = false,
+                                   processing_owner = NULL,
+                                   lease_expires_at = NULL,
+                                   last_heartbeat_at = NULL
+                             WHERE id = :id
+                               AND status = 'PROCESSING'
+                               AND processing_owner = :worker_id"""),
+                {"id": document_id, "worker_id": worker_id},
             )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-    def _check_cancel(self, document_id: str) -> None:
+    def _check_cancel(self, document_id: str, worker_id: str) -> None:
         db = SessionLocal()
         try:
-            requested = db.execute(
-                sql_text("SELECT cancel_requested FROM document WHERE id = :id"),
-                {"id": document_id},
-            ).scalar()
+            row = db.execute(
+                sql_text("""
+                    SELECT cancel_requested
+                      FROM document
+                     WHERE id = :id
+                       AND status = 'PROCESSING'
+                       AND processing_owner = :worker_id
+                       AND lease_expires_at >= now()
+                """),
+                {"id": document_id, "worker_id": worker_id},
+            ).first()
         finally:
             db.close()
-        if requested:
+        if not row:
+            raise IngestionLeaseLost()
+        if row[0]:
             raise IngestionCancelled()
 
     def _fetch_pdf(self, document_id: str) -> Tuple[bytes, str]:
@@ -335,11 +393,13 @@ class IngestionService:
         finally:
             db.close()
 
-    def _exec(self, statement: str, params: dict) -> None:
+    def _exec_owned(self, statement: str, params: dict) -> None:
         db = SessionLocal()
         try:
-            db.execute(sql_text(statement), params)
+            result = db.execute(sql_text(statement), params)
             db.commit()
+            if result.rowcount != 1:
+                raise IngestionLeaseLost()
         finally:
             db.close()
 

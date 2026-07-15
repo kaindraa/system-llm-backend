@@ -1,9 +1,8 @@
 """Database-backed ingestion queue helpers.
 
-The web process never runs heavy ingestion work. Instead, web requests mark
-documents as `UPLOADED`, and a dedicated worker process polls the database for
-pending jobs. This keeps user-facing HTTP traffic isolated from PDF parsing and
-embedding workloads.
+The document table is a durable queue. Workers claim rows atomically and hold
+a renewable lease, so a replacement worker only retries work after the former
+worker has actually stopped renewing ownership.
 """
 
 from app.core.logging import get_logger
@@ -12,89 +11,119 @@ from sqlalchemy import text as sql_text
 
 logger = get_logger(__name__)
 
-def requeue_orphans(reenqueue: bool = False) -> dict[str, int]:
-    """
-    Recover documents stuck in PROCESSING (left by a crash/deploy).
+def recover_expired_documents() -> dict[str, int]:
+    """Return only genuinely abandoned jobs to the queue.
 
-    - If cancellation had already been requested, mark the document CANCELLED.
-    - Otherwise reset it back to UPLOADED.
-    - Re-enqueueing is no longer needed because the worker polls `UPLOADED`
-      documents directly from the database.
-
-    Returns a small summary dict. Call at startup.
+    Jobs with a live lease are never touched. The rollout migration gives
+    legacy jobs a one-time grace lease before this worker version starts.
     """
     db = SessionLocal()
     try:
-        rows = db.execute(
+        cancelled = db.execute(
             sql_text("""
-                SELECT id, cancel_requested
-                  FROM document
+                UPDATE document
+                   SET status = 'CANCELLED',
+                       current_stage = NULL,
+                       cancel_requested = false,
+                       processing_owner = NULL,
+                       lease_expires_at = NULL,
+                       last_heartbeat_at = NULL
                  WHERE status = 'PROCESSING'
+                   AND cancel_requested = true
+                   AND lease_expires_at < now()
             """)
-        ).fetchall()
-        cancelled_ids = [str(row[0]) for row in rows if bool(row[1])]
-        reset_ids = [str(row[0]) for row in rows if not bool(row[1])]
-
-        if cancelled_ids:
-            db.execute(
-                sql_text("""
-                    UPDATE document
-                       SET status = 'CANCELLED',
-                           current_stage = NULL,
-                           cancel_requested = false
-                     WHERE status = 'PROCESSING'
-                       AND cancel_requested = true
-                """)
-            )
-        if reset_ids:
-            db.execute(
-                sql_text("""
-                    UPDATE document
-                       SET status = 'UPLOADED',
-                           current_stage = NULL
-                     WHERE status = 'PROCESSING'
-                       AND (cancel_requested = false OR cancel_requested IS NULL)
-                """)
-            )
-        if cancelled_ids or reset_ids:
-            db.commit()
+        ).rowcount
+        reset = db.execute(
+            sql_text("""
+                UPDATE document
+                   SET status = 'UPLOADED',
+                       current_stage = NULL,
+                       processing_owner = NULL,
+                       lease_expires_at = NULL,
+                       last_heartbeat_at = NULL
+                 WHERE status = 'PROCESSING'
+                   AND (cancel_requested = false OR cancel_requested IS NULL)
+                   AND lease_expires_at < now()
+            """)
+        ).rowcount
+        db.commit()
     finally:
         db.close()
 
-    requeued = 0
-    if reenqueue:
-        requeued = len(reset_ids)
-
-    if cancelled_ids or reset_ids:
+    if cancelled or reset:
         logger.info(
-            "[runner] recovered orphaned documents after startup "
-            "(reset=%s cancelled=%s requeued=%s)",
-            len(reset_ids),
-            len(cancelled_ids),
-            requeued,
+            "[runner] recovered expired document leases (reset=%s cancelled=%s)",
+            reset,
+            cancelled,
         )
 
     return {
-        "reset": len(reset_ids),
-        "cancelled": len(cancelled_ids),
-        "requeued": requeued,
+        "reset": reset,
+        "cancelled": cancelled,
     }
 
-def get_next_pending_document_id() -> str | None:
-    """Return the oldest pending document id, or None if the queue is empty."""
+def claim_next_document(worker_id: str, lease_seconds: int) -> str | None:
+    """Atomically claim the oldest queued document for one worker.
+
+    `SKIP LOCKED` lets future worker replicas pull different rows without
+    waiting on each other. Expired jobs are recovered separately before this
+    function is called, keeping the claim transition intentionally simple.
+    """
     db = SessionLocal()
     try:
         row = db.execute(
             sql_text("""
-                SELECT id
-                  FROM document
-                 WHERE status = 'UPLOADED'
-                 ORDER BY uploaded_at ASC
-                 LIMIT 1
-            """)
+                WITH candidate AS (
+                    SELECT id
+                      FROM document
+                     WHERE status = 'UPLOADED'
+                     ORDER BY uploaded_at ASC
+                     FOR UPDATE SKIP LOCKED
+                     LIMIT 1
+                )
+                UPDATE document AS d
+                   SET status = 'PROCESSING',
+                       current_stage = 'queued',
+                       cancel_requested = false,
+                       last_error = NULL,
+                       processing_owner = :worker_id,
+                       lease_expires_at = now() + (:lease_seconds * interval '1 second'),
+                       last_heartbeat_at = now(),
+                       attempt_count = attempt_count + 1
+                  FROM candidate
+                 WHERE d.id = candidate.id
+             RETURNING d.id
+            """),
+            {"worker_id": worker_id, "lease_seconds": lease_seconds},
         ).first()
+        db.commit()
         if not row:
             return None
         return str(row[0])
+    finally:
+        db.close()
+
+
+def renew_document_lease(document_id: str, worker_id: str, lease_seconds: int) -> bool:
+    """Extend a lease only when this worker still owns the document."""
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            sql_text("""
+                UPDATE document
+                   SET lease_expires_at = now() + (:lease_seconds * interval '1 second'),
+                       last_heartbeat_at = now()
+                 WHERE id = :document_id
+                   AND status = 'PROCESSING'
+                   AND processing_owner = :worker_id
+            """),
+            {
+                "document_id": document_id,
+                "worker_id": worker_id,
+                "lease_seconds": lease_seconds,
+            },
+        )
+        db.commit()
+        return result.rowcount == 1
     finally:
         db.close()
