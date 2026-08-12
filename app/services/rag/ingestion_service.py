@@ -26,7 +26,7 @@ import signal
 import threading
 import time
 from contextlib import contextmanager
-from typing import List, Dict, Tuple
+from typing import Any, Dict, List
 
 from sqlalchemy import text as sql_text
 
@@ -126,11 +126,17 @@ class IngestionService:
             chunks = self._chunk_text_with_pages(document_id, worker_id, pages_text)
             if not chunks:
                 raise ValueError("PDF produced zero chunks")
-            full_text = "\n\n".join(pages_text[p] for p in sorted(pages_text))
+            full_text = "\n\n".join(
+                pages_text[p]["text"] for p in sorted(pages_text)
+            )
 
             # 4. Embed (stage=embedding) — slow, network bound, no DB tx held
             self._set_stage(document_id, worker_id, IngestionStage.EMBEDDING, 55, "Creating embeddings")
-            embeddings = self._embed_chunks(document_id, worker_id, [c[0] for c in chunks])
+            embeddings = self._embed_chunks(
+                document_id,
+                worker_id,
+                [chunk["content"] for chunk in chunks],
+            )
 
             # 5. Insert (stage=inserting) — idempotent
             self._set_stage(document_id, worker_id, IngestionStage.INSERTING, 85, "Indexing chunks")
@@ -163,11 +169,17 @@ class IngestionService:
         document_id: str,
         worker_id: str,
         pdf_bytes: bytes,
-    ) -> Dict[int, str]:
-        """Extract text per page: {page_number: text}. (notebook cell 8)"""
+    ) -> Dict[int, Dict[str, Any]]:
+        """Extract text and native PDF word coordinates for every page.
+
+        We store the coordinates at ingestion time because PDF.js and
+        pdfplumber do not always produce byte-for-byte equivalent text. A
+        citation can therefore be highlighted from its source geometry instead
+        of depending on brittle browser-side text matching.
+        """
         import pdfplumber
 
-        pages_text: Dict[int, str] = {}
+        pages_text: Dict[int, Dict[str, Any]] = {}
         with _pdf_parse_deadline(settings.INGESTION_PDF_PARSE_TIMEOUT_SECONDS):
             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
                 page_count = len(pdf.pages)
@@ -180,9 +192,18 @@ class IngestionService:
                 for page_num, page in enumerate(pdf.pages, 1):
                     try:
                         self._check_cancel(document_id, worker_id)
-                        extracted = page.extract_text()
-                        if extracted:
-                            pages_text[page_num] = extracted
+                        words = page.extract_words(
+                            x_tolerance=3,
+                            y_tolerance=3,
+                            use_text_flow=True,
+                        )
+                        if words:
+                            pages_text[page_num] = {
+                                "text": " ".join(str(word["text"]) for word in words),
+                                "words": words,
+                                "width": float(page.width),
+                                "height": float(page.height),
+                            }
                         if page_num % update_every == 0 or page_num == page_count:
                             progress = 2 + int((page_num / page_count) * 38)
                             self._set_progress(
@@ -205,40 +226,55 @@ class IngestionService:
         self,
         document_id: str,
         worker_id: str,
-        pages_text: Dict[int, str]
-    ) -> List[Tuple[str, int]]:
-        """Sentence-aware, word-counted chunking with page tracking. (notebook cell 10)"""
+        pages_text: Dict[int, Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Word-counted chunks with page tracking and highlight rectangles.
+
+        Chunks remain page-local. The overlap is represented by the same source
+        words in adjacent chunks, which makes their stored highlight geometry
+        precise even when a browser PDF renderer extracts text differently.
+        """
         chunk_size = self.CHUNK_SIZE
         overlap = self.CHUNK_OVERLAP
-        chunks_with_pages: List[Tuple[str, int]] = []
+        chunks_with_pages: List[Dict[str, Any]] = []
 
         page_numbers = sorted(pages_text.keys())
         total_pages = len(page_numbers)
         update_every = max(1, total_pages // 20)
         for position, page_num in enumerate(page_numbers, 1):
             self._check_cancel(document_id, worker_id)
-            page_content = pages_text[page_num]
-            sentences = re.split(r'(?<=[.!?])\s+', page_content)
+            page = pages_text[page_num]
+            words = page["words"]
+            start = 0
+            while start < len(words):
+                proposed_end = min(start + chunk_size, len(words))
+                end = proposed_end
 
-            current_chunk: List[str] = []
-            current_size = 0
+                # Prefer a nearby sentence boundary without sacrificing a
+                # predictable maximum chunk size. Looking back 20% keeps very
+                # long sentences from producing tiny chunks.
+                minimum_end = start + max(1, int(chunk_size * 0.8))
+                if proposed_end < len(words):
+                    for index in range(proposed_end - 1, minimum_end - 1, -1):
+                        if re.search(r'[.!?][\]"\')]*$', str(words[index]["text"])):
+                            end = index + 1
+                            break
 
-            for sentence in sentences:
-                words = sentence.split()
-                if current_size + len(words) > chunk_size and current_chunk:
-                    chunk_content = ' '.join(current_chunk)
-                    chunks_with_pages.append((chunk_content, page_num))
-                    # keep a small word overlap for context continuity
-                    current_chunk = current_chunk[-int(overlap / 10):]
-                    current_size = len(' '.join(current_chunk).split())
+                chunk_words = words[start:end]
+                chunks_with_pages.append({
+                    "content": " ".join(str(word["text"]) for word in chunk_words),
+                    "page_number": page_num,
+                    "highlight": {
+                        "version": 1,
+                        "page_width": round(page["width"], 3),
+                        "page_height": round(page["height"], 3),
+                        "rects": self._build_highlight_rects(chunk_words),
+                    },
+                })
 
-                current_chunk.extend(words)
-                current_size += len(words)
-
-            # flush remainder of the page
-            if current_chunk:
-                chunk_content = ' '.join(current_chunk)
-                chunks_with_pages.append((chunk_content, page_num))
+                if end >= len(words):
+                    break
+                start = max(end - overlap, start + 1)
             if position % update_every == 0 or position == total_pages:
                 progress = 40 + int((position / total_pages) * 15)
                 self._set_progress(
@@ -251,6 +287,53 @@ class IngestionService:
                 )
 
         return chunks_with_pages
+
+    @staticmethod
+    def _build_highlight_rects(words: List[Dict[str, Any]]) -> List[Dict[str, float]]:
+        """Return compact line rectangles in the PDF's native coordinate space."""
+        rects: List[Dict[str, float]] = []
+        current: Dict[str, float] | None = None
+
+        for word in words:
+            try:
+                x0 = float(word["x0"])
+                top = float(word["top"])
+                x1 = float(word["x1"])
+                bottom = float(word["bottom"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            # A large horizontal gap is a new region even if another column
+            # happens to share the same baseline.
+            same_line = (
+                current is not None
+                and abs(top - current["top"]) <= 2
+                and x0 <= current["x1"] + 24
+            )
+            if not same_line:
+                if current is not None:
+                    rects.append(current)
+                current = {"x0": x0, "top": top, "x1": x1, "bottom": bottom}
+                continue
+
+            current["x0"] = min(current["x0"], x0)
+            current["top"] = min(current["top"], top)
+            current["x1"] = max(current["x1"], x1)
+            current["bottom"] = max(current["bottom"], bottom)
+
+        if current is not None:
+            rects.append(current)
+
+        return [
+            {
+                "x": round(rect["x0"], 3),
+                "y": round(rect["top"], 3),
+                "width": round(rect["x1"] - rect["x0"], 3),
+                "height": round(rect["bottom"] - rect["top"], 3),
+            }
+            for rect in rects
+            if rect["x1"] > rect["x0"] and rect["bottom"] > rect["top"]
+        ]
 
     def _embed_chunks(
         self,
@@ -298,7 +381,7 @@ class IngestionService:
         self,
         document_id: str,
         worker_id: str,
-        chunks: List[Tuple[str, int]],
+        chunks: List[Dict[str, Any]],
         embeddings: List[List[float]],
         full_text: str,
     ) -> None:
@@ -326,15 +409,21 @@ class IngestionService:
 
             total_chunks = len(chunks)
             update_every = max(1, total_chunks // 10)
-            for idx, ((content, page_number), embedding) in enumerate(zip(chunks, embeddings)):
+            for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 self._check_cancel(document_id, worker_id)
+                content = chunk["content"]
+                page_number = chunk["page_number"]
                 db.add(DocumentChunk(
                     document_id=document_id,
                     chunk_index=idx,
                     content=content,
                     page_number=page_number,
                     embedding=embedding,  # SQLAlchemy/pgvector handles list -> vector
-                    chunk_metadata={"page": page_number, "chunk_sequence": idx},
+                    chunk_metadata={
+                        "page": page_number,
+                        "chunk_sequence": idx,
+                        "highlight": chunk["highlight"],
+                    },
                 ))
                 if (idx + 1) % update_every == 0 or idx + 1 == total_chunks:
                     progress = 85 + int(((idx + 1) / total_chunks) * 14)

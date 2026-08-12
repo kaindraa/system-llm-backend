@@ -541,6 +541,13 @@ class ChatService:
 
         try:
             if use_tools:
+                # A model may correctly identify that a broad question needs
+                # refinement, then decide to answer its own refinement instead
+                # of calling semantic_search on the next tool-loop turn. Once
+                # refinement has happened, retrieval is therefore a workflow
+                # requirement rather than a second model decision.
+                forced_search_query: Optional[str] = None
+
                 # --- RAG Mode: Tool Calling ---
                 # Use tool calling with RAG
                 async for event in provider.agenerate_stream_with_tools(
@@ -669,6 +676,23 @@ class ChatService:
 
                         yield event_to_yield
 
+                        if (
+                            not error
+                            and event_to_yield["content"]["success"]
+                            and isinstance(refined, str)
+                            and refined.strip()
+                        ):
+                            forced_search_query = refined.strip()
+                            logger.info(
+                                "[CHAT_SERVICE] Refinement completed; "
+                                "running mandatory semantic search before answering"
+                            )
+                            # Close the model's tool loop before it emits a
+                            # free-form response based solely on the refine
+                            # result. We resume with explicit RAG context
+                            # below.
+                            break
+
                     elif event_type == "rag_search_result":
                         # RAG/semantic_search tool executed and returned results
                         tool_name = event_content.get("tool_name")
@@ -759,6 +783,124 @@ class ChatService:
                         full_content += chunk_content
                         yield {"type": "chunk", "content": chunk_content}
 
+                if forced_search_query:
+                    semantic_search_tool = next(
+                        (tool for tool in rag_tools if tool.name == "semantic_search"),
+                        None,
+                    )
+                    if semantic_search_tool is None:
+                        raise RuntimeError("semantic_search tool is not configured")
+
+                    yield {
+                        "type": "rag_search",
+                        "content": {
+                            "query": forced_search_query,
+                            "status": "searching",
+                        },
+                    }
+
+                    # Invoke the same tool implementation used by providers.
+                    # This preserves one configured threshold/top-k policy for
+                    # both ordinary tool calls and refine-followed searches.
+                    search_result = semantic_search_tool.func(query=forced_search_query)
+                    search_error = (
+                        search_result.get("error")
+                        if isinstance(search_result, dict)
+                        else "semantic_search returned an invalid result"
+                    )
+                    search_results = (
+                        search_result.get("results", [])
+                        if isinstance(search_result, dict)
+                        else []
+                    )
+                    search_sources = (
+                        search_result.get("sources", [])
+                        if isinstance(search_result, dict)
+                        else []
+                    )
+
+                    if search_error:
+                        logger.warning(
+                            "[CHAT_SERVICE] Mandatory semantic search failed: %s",
+                            search_error,
+                        )
+                    else:
+                        sources_list.extend(search_sources)
+                        real_messages_list.append({
+                            "role": "assistant",
+                            "content": "",
+                            "created_at": datetime.utcnow().isoformat(),
+                            "tool_calls": [{
+                                "name": "semantic_search",
+                                "args": {"query": forced_search_query},
+                            }],
+                        })
+                        real_messages_list.append({
+                            "role": "tool",
+                            "content": json.dumps({
+                                "query": forced_search_query,
+                                "chunks": search_results,
+                                "sources": search_sources,
+                                "count": len(search_results),
+                            }, ensure_ascii=False, indent=2),
+                            "created_at": datetime.utcnow().isoformat(),
+                            "tool_call_id": "tool_call_semantic_search",
+                        })
+                        if "semantic_search" not in tools_used:
+                            tools_used.append("semantic_search")
+
+                    yield {
+                        "type": "rag_search",
+                        "content": {
+                            "query": forced_search_query,
+                            "results_count": len(search_results),
+                            "status": "completed",
+                            "sources": search_sources,
+                            **({"error": search_error} if search_error else {}),
+                        },
+                    }
+
+                    retrieved_context = "\n".join(
+                        (
+                            f"[Source {index}] {result.get('filename', 'Document')} "
+                            f"(Page {result.get('page', 1)})\n"
+                            f"{result.get('content', '')}"
+                        )
+                        for index, result in enumerate(search_results, 1)
+                    )
+                    retrieval_instruction = (
+                        "\n\nA prompt-refinement step has already completed. "
+                        "Answer the student's original message directly now; do not ask "
+                        "them to refine it again and do not describe internal tool steps. "
+                        "Base factual claims on the retrieved knowledge-base context below. "
+                        "If it is empty, clearly say that no relevant document was found.\n\n"
+                        f"Refined retrieval query: {forced_search_query}\n\n"
+                        f"Retrieved knowledge-base context:\n{retrieved_context or '(no results)'}"
+                    )
+                    answer_messages = []
+                    system_augmented = False
+                    for message in conversation_context:
+                        if message.get("role") == "system" and not system_augmented:
+                            answer_messages.append({
+                                **message,
+                                "content": f"{message.get('content', '')}{retrieval_instruction}",
+                            })
+                            system_augmented = True
+                        else:
+                            answer_messages.append(message)
+                    if not system_augmented:
+                        answer_messages.insert(0, {
+                            "role": "system",
+                            "content": retrieval_instruction,
+                        })
+
+                    # This final generation has no tools. Retrieval is already
+                    # complete, so the assistant cannot stop at a planning
+                    # sentence instead of producing the requested answer.
+                    async for chunk in provider.agenerate_stream(messages=answer_messages):
+                        full_content += chunk
+                        yield {"type": "chunk", "content": chunk}
+
             else:
                 # --- Regular Mode: No RAG ---
                 async for chunk in provider.agenerate_stream(messages=conversation_context):
@@ -786,6 +928,7 @@ class ChatService:
                     "page_number": source.get("page") or source.get("page_number", 1),  # Support both field names
                     "chunk_index": source.get("chunk_index"),
                     "chunk_text": source.get("chunk_text") or source.get("content") or None,
+                    "highlight": source.get("highlight"),
                     "similarity_score": source.get("similarity_score", 0.85),
                 }
                 key = normalized["chunk_id"] or (

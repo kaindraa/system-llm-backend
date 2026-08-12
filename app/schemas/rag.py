@@ -42,6 +42,10 @@ class RAGSource(BaseModel):
     page: Optional[int] = Field(None, description="Page number where content was found")
     chunk_index: Optional[int] = Field(None, description="Chunk index in the document")
     chunk_text: Optional[str] = Field(None, description="Full retrieved chunk used as citation evidence")
+    highlight: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Native PDF rectangles for highlighting the complete retrieved chunk",
+    )
     similarity_score: float = Field(..., description="Relevance score (0-1)")
 
     class Config:

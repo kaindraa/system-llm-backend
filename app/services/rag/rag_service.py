@@ -241,6 +241,10 @@ class RAGService:
                     "page": chunk["page"],
                     "chunk_index": chunk.get("chunk_index"),
                     "chunk_text": chunk["content"],
+                    # Geometry is generated during ingestion in the PDF's
+                    # native coordinate space. It allows the client to draw a
+                    # deterministic highlight without re-extracting text.
+                    "highlight": (chunk.get("metadata") or {}).get("highlight"),
                     "similarity_score": chunk["similarity_score"],
                 })
                 seen.add(key)
