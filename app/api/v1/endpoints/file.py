@@ -45,6 +45,13 @@ class FileDownloadDiagnostics(BaseModel):
     recommendations: list[str] = []
 
 
+class FileViewUrlResponse(BaseModel):
+    """Short-lived, storage-hosted URL used by browser PDF viewers."""
+
+    url: str
+    expires_in: int
+
+
 @router.post(
     "/upload",
     response_model=FileUploadResponse,
@@ -165,6 +172,41 @@ async def list_files(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list files: {str(e)}"
+        )
+
+
+@router.get(
+    "/{file_id}/view-url",
+    response_model=FileViewUrlResponse,
+    summary="Get a temporary direct URL for viewing a file",
+)
+async def get_file_view_url(
+    file_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Authorize a viewer, then issue a short-lived direct-storage PDF URL."""
+    try:
+        file_service = FileService(db=db)
+        return FileViewUrlResponse(
+            url=file_service.create_file_view_url(str(file_id)),
+            expires_in=600,
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with ID '{file_id}' not found",
+        )
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Direct viewing is not available for the configured storage provider",
+        )
+    except Exception as exc:
+        logger.error("Could not create file view URL for %s: %s", file_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not prepare the document for viewing",
         )
 
 

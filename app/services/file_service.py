@@ -96,6 +96,10 @@ class FileStorageProvider(ABC):
         """
         pass
 
+    def create_view_url(self, file_id: str, expires_in: int) -> str:
+        """Return a short-lived browser URL when the storage supports it."""
+        raise NotImplementedError("This storage provider does not support signed URLs")
+
 
 class LocalFileStorage(FileStorageProvider):
     """Local file system storage provider"""
@@ -569,6 +573,23 @@ class SupabaseStorageProvider(FileStorageProvider):
             yield content[offset:end]
             offset = end
 
+    def create_view_url(self, file_id: str, expires_in: int) -> str:
+        """Create a short-lived URL so browsers fetch PDFs from storage directly."""
+        path = self._get_object_path(file_id)
+        try:
+            result = self._store.create_signed_url(path, expires_in)
+            url = result.get("signedURL")
+            if not url:
+                raise ValueError("Supabase did not return a signed URL")
+            return url
+        except Exception as exc:
+            logger.error(
+                "[SupabaseStorageProvider.create_view_url] Could not sign %s: %s",
+                file_id,
+                exc,
+            )
+            raise
+
 
 # Global instance - will be initialized in main.py based on config
 storage_provider: FileStorageProvider = None
@@ -656,6 +677,21 @@ class FileService:
         if not document:
             raise FileNotFoundError(f"Document not found: {file_id}")
         return document
+
+    def create_file_view_url(self, file_id: str, expires_in: int = 600) -> str:
+        """Return a short-lived direct URL for browser PDF viewers.
+
+        The authorization check happens in the API endpoint before this method
+        is called. Fetching the PDF from object storage afterwards avoids
+        proxying large files through the API machine.
+        """
+        document = self.get_file(file_id)
+        file_reference = (
+            document.original_filename
+            if isinstance(self.storage, LocalFileStorage)
+            else document.filename
+        )
+        return self.storage.create_view_url(file_reference, expires_in)
 
     def get_file_content(self, file_id: str) -> bytes:
         """
