@@ -172,22 +172,36 @@ class OpenRouterProvider(BaseLLMProvider):
         # Convert messages to langchain format
         langchain_messages = self._convert_messages(messages)
 
-        # Temporarily remove temperature
-        original_temp = self._client.temperature
-        original_max_tokens = self._client.max_tokens
-
-        self._client.temperature = 1
-        self._client.max_tokens = None
-
-        try:
-            # Stream response asynchronously
-            async for chunk in self._client.astream(langchain_messages):
-                if chunk.content:
-                    yield chunk.content
-        finally:
-            # Restore original values
-            self._client.temperature = original_temp
-            self._client.max_tokens = original_max_tokens
+        # A streamed tool call can be closed immediately after it returns a
+        # refinement result. Reusing that connection for the final answer can
+        # occasionally fail before OpenRouter sends its first byte. Retry only
+        # that safe case with a fresh client; after any text is yielded we must
+        # not retry because it would duplicate the answer in the SSE stream.
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            client = self._client if attempt == 1 else self._create_client()
+            received_content = False
+            try:
+                async for chunk in client.astream(langchain_messages):
+                    if chunk.content:
+                        received_content = True
+                        yield chunk.content
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if received_content or attempt >= max_attempts:
+                    raise
+                delay_seconds = attempt
+                logger.warning(
+                    "[OPENROUTER] Stream connection failed before first token "
+                    "(attempt %s/%s): %s. Retrying with a fresh client in %ss.",
+                    attempt,
+                    max_attempts,
+                    exc,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
 
     def get_provider_name(self) -> str:
         """Get provider name."""
