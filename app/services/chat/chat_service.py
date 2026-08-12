@@ -724,7 +724,12 @@ class ChatService:
                                     "content": {
                                         "query": result.get("query", ""),
                                         "results_count": result.get("count", 0),
-                                        "status": "completed"
+                                        "status": "completed",
+                                        # Preserve citations at retrieval time as well as
+                                        # in the final done payload. This prevents a
+                                        # proxy/interrupted stream from losing valid
+                                        # source badges after a successful search.
+                                        "sources": tool_sources,
                                     }
                                 }
                                 if "semantic_search" not in tools_used:
