@@ -764,21 +764,30 @@ class ChatService:
             logger.error(f"LLM error in session {session_id}: {str(e)}")
             raise
 
-        # Remove duplicate sources (by document_id and page) and normalize field names
+        # Build one persisted citation per retrieved chunk. A document may have
+        # several relevant chunks on the same page, so document/page is not a
+        # sufficiently precise identity for source highlighting.
         unique_sources = []
         if use_tools and sources_list:
             seen = set()
             for source in sources_list:
                 # Normalize field names for consistency with frontend
-                # RAG service returns: document_id, filename, page, similarity_score
-                # Frontend expects: document_id, document_name, page_number, similarity_score
+                # RAG service returns a chunk citation. Keep its text snapshot so
+                # historical messages remain highlightable after a page reload.
                 normalized = {
+                    "chunk_id": source.get("chunk_id") or None,
                     "document_id": source.get("document_id", ""),
                     "document_name": source.get("filename") or source.get("document_name", "Document"),  # Support both field names
                     "page_number": source.get("page") or source.get("page_number", 1),  # Support both field names
-                    "similarity_score": source.get("similarity_score", 0.85)
+                    "chunk_index": source.get("chunk_index"),
+                    "chunk_text": source.get("chunk_text") or source.get("content") or None,
+                    "similarity_score": source.get("similarity_score", 0.85),
                 }
-                key = (normalized["document_id"], normalized["page_number"])
+                key = normalized["chunk_id"] or (
+                    normalized["document_id"],
+                    normalized["chunk_index"],
+                    normalized["page_number"],
+                )
                 if key not in seen:
                     unique_sources.append(normalized)
                     seen.add(key)

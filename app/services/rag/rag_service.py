@@ -208,29 +208,44 @@ class RAGService:
 
     def extract_sources(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Extract source metadata from retrieved chunks.
+        Build one citation per retrieved chunk.
 
         Args:
             chunks: List of chunk dicts from semantic_search()
 
         Returns:
-            List of source dicts with: document_id, filename, page, similarity_score
+            List of citation dicts. Each citation retains the retrieved chunk text so
+            the client can highlight the exact evidence that was used by RAG.
+
+        Notes:
+            A document can contain several relevant chunks on one page. Do not
+            collapse them by page number: the chunk ID is the citation identity.
         """
         sources = []
-        seen = set()  # Track unique (doc_id, page) pairs
+        seen = set()
 
         for chunk in chunks:
-            key = (chunk['document_id'], chunk['page'])
+            chunk_id = str(chunk.get("chunk_id", ""))
+            # A semantic-search result should always have a chunk ID. Keep the
+            # fallback defensive for legacy/test callers that do not provide one.
+            key = chunk_id or (
+                str(chunk.get("document_id", "")),
+                chunk.get("chunk_index"),
+                chunk.get("page"),
+            )
             if key not in seen:
                 sources.append({
-                    "document_id": chunk['document_id'],
-                    "filename": chunk['filename'],
-                    "page": chunk['page'],
-                    "similarity_score": chunk['similarity_score']
+                    "chunk_id": chunk_id or None,
+                    "document_id": chunk["document_id"],
+                    "filename": chunk["filename"],
+                    "page": chunk["page"],
+                    "chunk_index": chunk.get("chunk_index"),
+                    "chunk_text": chunk["content"],
+                    "similarity_score": chunk["similarity_score"],
                 })
                 seen.add(key)
 
-        logger.debug(f"Extracted {len(sources)} unique sources from {len(chunks)} chunks")
+        logger.debug(f"Built {len(sources)} chunk citations from {len(chunks)} retrieval results")
         return sources
 
     def get_user_documents(self, user_id: UUID) -> List[Dict[str, Any]]:

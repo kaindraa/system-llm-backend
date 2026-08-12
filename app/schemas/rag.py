@@ -36,9 +36,12 @@ class RAGSearchResult(BaseModel):
 
 class RAGSource(BaseModel):
     """Source document reference for citations."""
+    chunk_id: Optional[str] = Field(None, description="Retrieved document-chunk ID")
     document_id: str = Field(..., description="Document ID")
     filename: str = Field(..., description="Document filename")
     page: Optional[int] = Field(None, description="Page number where content was found")
+    chunk_index: Optional[int] = Field(None, description="Chunk index in the document")
+    chunk_text: Optional[str] = Field(None, description="Full retrieved chunk used as citation evidence")
     similarity_score: float = Field(..., description="Relevance score (0-1)")
 
     class Config:
