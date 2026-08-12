@@ -7,7 +7,6 @@ set -e
 
 # Debug output
 echo "=== Starting System LLM Backend ==="
-echo "Database URL: ${DATABASE_URL}"
 echo "Cloud SQL Instance: ${CLOUD_SQL_INSTANCES}"
 echo "Port: ${PORT:-8000}"
 

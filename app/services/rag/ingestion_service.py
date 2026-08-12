@@ -26,7 +26,7 @@ import signal
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import text as sql_text
 
