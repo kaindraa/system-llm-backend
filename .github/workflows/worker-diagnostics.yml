@@ -1,0 +1,37 @@
+name: Worker Diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: List worker machines
+        run: |
+          flyctl machines list -a system-llm-backend --json \
+            | jq -r '.[] | select(.config.metadata.fly_process_group == "worker") | {id, state, region, image}'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Print safe worker logs
+        run: |
+          set -euo pipefail
+          worker_ids="$(flyctl machines list -a system-llm-backend --json \
+            | jq -r '.[] | select(.config.metadata.fly_process_group == "worker") | .id')"
+
+          if [ -z "$worker_ids" ]; then
+            echo "No worker machines found."
+            exit 1
+          fi
+
+          while IFS= read -r worker_id; do
+            echo "--- worker ${worker_id} ---"
+            # Keep secrets and unrelated request logs out of CI output. The
+            # ingestion prefixes are enough to diagnose the queue lifecycle.
+            flyctl logs -a system-llm-backend --machine "$worker_id" --no-tail 2>&1 \
+              | grep -E '\[(worker|ingest|runner)\]' || true
+          done <<< "$worker_ids"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
