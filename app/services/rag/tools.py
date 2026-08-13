@@ -105,11 +105,23 @@ class RAGToolFactory:
 
                 # Extract unique sources
                 sources = self.rag_service.extract_sources(chunks)
+                citation_ids_by_chunk = {}
+                for index, source in enumerate(sources, 1):
+                    # This compact, request-scoped label is the only identity
+                    # exposed to the model. The client maps it back to the
+                    # immutable chunk ID stored in the source metadata.
+                    citation_id = f"S{index}"
+                    source["citation_id"] = citation_id
+                    if source.get("chunk_id"):
+                        citation_ids_by_chunk[str(source["chunk_id"])] = citation_id
 
                 # Format results for LLM
                 results_for_llm = []
                 for chunk in chunks:
                     results_for_llm.append({
+                        "citation_id": citation_ids_by_chunk.get(
+                            str(chunk.get("chunk_id")),
+                        ),
                         "filename": chunk['filename'],
                         "page": chunk['page'],
                         "content": chunk['content'],

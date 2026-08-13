@@ -6,6 +6,7 @@ Integrates with LLM service for generating responses.
 """
 
 import json
+import re
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -22,6 +23,9 @@ from app.services.rag_config_service import ChatConfigService
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+INLINE_CITATION_PATTERN = re.compile(r"\[\[cite:(S\d+)\]\]")
 
 
 class ChatService:
@@ -387,8 +391,18 @@ class ChatService:
                 logger.warning(f"Failed to load RAG config, using default include_rag_instruction=True: {e}")
                 include_rag_instruction = True
 
-        # RAG instruction is now included in prompt_general (Teacher's Specific Prompt)
-        # No additional RAG instruction appended here
+        # Citation syntax is application-owned rather than user-configurable.
+        # It gives the frontend a deterministic mapping to the retrieved chunk
+        # without asking the model to invent document titles or page numbers.
+        if include_rag_instruction:
+            system_content += (
+                "\n\n# Inline source citations\n"
+                "When semantic_search returns results with citation_id values such as S1 "
+                "or S2, cite a retrieved factual claim immediately after the claim using "
+                "exactly [[cite:S1]]. Use only citation_id values returned by the tool. "
+                "Do not write source titles, page numbers, or other citation formats manually. "
+                "Do not cite claims that are not supported by retrieved results."
+            )
 
         if system_content:
             context.append({
@@ -404,6 +418,22 @@ class ChatService:
             })
 
         return context
+
+    @staticmethod
+    def _normalize_inline_citations(
+        content: str,
+        sources: List[Dict[str, Any]],
+    ) -> str:
+        """Remove hallucinated inline citation labels before persistence/output."""
+        valid_ids = {
+            source.get("citation_id")
+            for source in sources
+            if isinstance(source.get("citation_id"), str)
+        }
+        return INLINE_CITATION_PATTERN.sub(
+            lambda match: match.group(0) if match.group(1) in valid_ids else "",
+            content,
+        )
 
     def _get_model(self, model_id: str) -> Optional[Model]:
         """Get model from database by ID or name."""
@@ -862,7 +892,8 @@ class ChatService:
 
                     retrieved_context = "\n".join(
                         (
-                            f"[Source {index}] {result.get('filename', 'Document')} "
+                            f"[{result.get('citation_id') or f'S{index}'}] "
+                            f"{result.get('filename', 'Document')} "
                             f"(Page {result.get('page', 1)})\n"
                             f"{result.get('content', '')}"
                         )
@@ -873,6 +904,9 @@ class ChatService:
                         "Answer the student's original message directly now; do not ask "
                         "them to refine it again and do not describe internal tool steps. "
                         "Base factual claims on the retrieved knowledge-base context below. "
+                        "For each factual claim supported by a retrieved source, append its "
+                        "exact citation marker such as [[cite:S1]]. Use only the S-labels "
+                        "shown below; never write a source title or page number manually. "
                         "If it is empty, clearly say that no relevant document was found.\n\n"
                         f"Refined retrieval query: {forced_search_query}\n\n"
                         f"Retrieved knowledge-base context:\n{retrieved_context or '(no results)'}"
@@ -922,6 +956,7 @@ class ChatService:
                 # RAG service returns a chunk citation. Keep its text snapshot so
                 # historical messages remain highlightable after a page reload.
                 normalized = {
+                    "citation_id": source.get("citation_id") or None,
                     "chunk_id": source.get("chunk_id") or None,
                     "document_id": source.get("document_id", ""),
                     "document_name": source.get("filename") or source.get("document_name", "Document"),  # Support both field names
@@ -939,6 +974,11 @@ class ChatService:
                 if key not in seen:
                     unique_sources.append(normalized)
                     seen.add(key)
+
+        # Never persist or render a reference to a source that did not arrive
+        # from this request's retrieval result. The UI independently applies
+        # the same guard while it is receiving streamed text.
+        full_content = self._normalize_inline_citations(full_content, unique_sources)
 
         # Create assistant message (MINIMAL format - ONLY role + content for interaction_messages)
         assistant_message = {

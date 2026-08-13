@@ -36,6 +36,10 @@ class RAGSearchResult(BaseModel):
 
 class RAGSource(BaseModel):
     """Source document reference for citations."""
+    citation_id: Optional[str] = Field(
+        None,
+        description="Request-scoped label (for example S1) used in inline citations",
+    )
     chunk_id: Optional[str] = Field(None, description="Retrieved document-chunk ID")
     document_id: str = Field(..., description="Document ID")
     filename: str = Field(..., description="Document filename")
